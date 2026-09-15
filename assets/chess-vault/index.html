@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Chess Vault</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="logo">♞ Chess Vault</div>
+  <div class="hdr-sub" id="hdrSub">sincronize suas partidas</div>
+</header>
+
+<nav id="tabs">
+  <button data-tab="dash" class="active">📊 Resumo</button>
+  <button data-tab="openings">📖 Aberturas</button>
+  <button data-tab="errors">⚠️ Erros</button>
+  <button data-tab="games">♟️ Partidas</button>
+  <button data-tab="config">⚙️ Conta</button>
+</nav>
+
+<main>
+<section id="tab-dash" class="tab active">
+  <div class="cards" id="dashCards"><div class="card dim">Carregando…</div></div>
+  <h3>Por ritmo</h3>
+  <div id="byTc"></div>
+  <h3>Por cor</h3>
+  <div id="byColor"></div>
+  <h3>Derrotas: como você perde</h3>
+  <div id="lossTypes"></div>
+</section>
+
+<section id="tab-openings" class="tab">
+  <h3>Suas aberturas (top 15 por volume)</h3>
+  <div id="openList"><div class="card dim">Carregando…</div></div>
+</section>
+
+<section id="tab-errors" class="tab">
+  <h3>Onde você quebra (mate recebido → erro ~3 lances antes)</h3>
+  <div class="cards" id="errPhase"></div>
+  <h3>Histograma: lance do erro</h3>
+  <div id="errHist"></div>
+</section>
+
+<section id="tab-games" class="tab">
+  <div id="gameList"><div class="card dim">Carregando…</div></div>
+  <div class="pager">
+    <button id="prevPg">← Anteriores</button>
+    <span id="pgInfo"></span>
+    <button id="nextPg">Próximas →</button>
+  </div>
+  <div id="gameDetail" class="hidden">
+    <button id="backList">← Voltar à lista</button>
+    <h3 id="gdTitle"></h3>
+    <div id="boardWrap">
+      <canvas id="board" width="360" height="360"></canvas>
+      <div id="boardNav">
+        <button id="mvFirst">⏮</button>
+        <button id="mvPrev">←</button>
+        <span id="mvInfo">início</span>
+        <button id="mvNext">→</button>
+        <button id="mvLast">⏭</button>
+        <button id="mvFlip">🔄</button>
+      </div>
+      <div id="gdMeta"></div>
+    </div>
+  </div>
+</section>
+
+<section id="tab-config" class="tab">
+  <div class="card">
+    <h3>Conta chess.com</h3>
+    <label>Username
+      <input id="cfgUser" type="text" placeholder="ex: luckgaspar" autocapitalize="off" spellcheck="false">
+    </label>
+    <div class="row">
+      <button id="btnSaveUser">Salvar</button>
+      <button id="btnSync">🔄 Sincronizar agora</button>
+    </div>
+    <p class="hint">O sync baixa os arquivos mensais públicos da API e guarda no cofre local. Sem login, sem chave.</p>
+  </div>
+  <div class="card">
+    <h3>Sync automático (9h e 21h Brasília)</h3>
+    <div class="row">
+      <button id="btnAutoOn">Ativar</button>
+      <button id="btnAutoOff">Desativar</button>
+    </div>
+    <p class="hint" id="syncInfo"></p>
+  </div>
+  <div class="card danger">
+    <h3>Zona de perigo</h3>
+    <div class="row">
+      <button id="btnExport">Exportar JSON</button>
+      <button id="btnWipe">Apagar cofre</button>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer><span id="footInfo">Chess Vault • dados locais, API pública chess.com</span></footer>
+<script src="chess.min.js"></script>
+<script src="board.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
