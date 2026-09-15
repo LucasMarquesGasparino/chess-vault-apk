@@ -70,7 +70,17 @@ public final class SyncEngine {
             java.text.SimpleDateFormat sdfFull = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
             db.putConfig("full_sync_date", sdfFull.format(new java.util.Date()));
         } else {
+            long maxEnd = db.getMaxEndTime();
             int startIdx = Math.max(0, archives.size() - 2);
+            if (maxEnd > 0) {
+                int found = -1;
+                String maxYm = yearMonthPathOf(maxEnd);
+                for (int i = 0; i < archives.size(); i++) {
+                    if (archives.get(i).endsWith(maxYm)) { found = i; break; }
+                }
+                if (found >= 0) startIdx = Math.max(0, found - 1);
+                Log.i(TAG, "incremental desde end_time=" + maxEnd + " (" + maxYm + "), arquivo " + startIdx);
+            }
             SyncService.SyncProgress.totalMonths = archives.size() - startIdx;
             int step = 0;
             for (int i = startIdx; i < archives.size(); i++) {
@@ -83,7 +93,7 @@ public final class SyncEngine {
                 SyncService.SyncProgress.statusMessage = "Mês " + ym;
                 if (listener != null) listener.onProgress("Sync recente (" + ym + ")...");
 
-                int inserted = fetchAndStoreMonth(db, username, archiveUrl);
+                int inserted = fetchAndStoreMonth(db, username, archiveUrl, maxEnd);
                 totalInserted += inserted;
                 SyncService.SyncProgress.gamesInserted = totalInserted;
                 try { Thread.sleep(120); } catch (Exception ignored) {}
@@ -118,6 +128,10 @@ public final class SyncEngine {
     }
 
     static int fetchAndStoreMonth(DatabaseHelper db, String username, String archiveUrl) {
+        return fetchAndStoreMonth(db, username, archiveUrl, 0);
+    }
+
+    static int fetchAndStoreMonth(DatabaseHelper db, String username, String archiveUrl, long minEndTime) {
         try {
             String body = httpGetWithRetry(archiveUrl);
             JSONObject o = new JSONObject(body);
@@ -128,6 +142,7 @@ public final class SyncEngine {
                 JSONObject g = games.getJSONObject(i);
                 long endTime = g.optLong("end_time", 0);
                 if (endTime <= 0) continue;
+                if (minEndTime > 0 && endTime <= minEndTime) continue;
                 JSONObject flat = GameParser.flattenGame(username, g);
                 if (flat != null) toInsert.put(flat);
             }
@@ -136,6 +151,16 @@ public final class SyncEngine {
         } catch (Exception e) {
             Log.w(TAG, "month failed " + archiveUrl + ": " + e.getMessage());
             return 0;
+        }
+    }
+
+    static String yearMonthPathOf(long endTimeSec) {
+        try {
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy/MM", java.util.Locale.US);
+            sdf.setTimeZone(java.util.TimeZone.getTimeZone("America/Sao_Paulo"));
+            return sdf.format(new java.util.Date(endTimeSec * 1000L));
+        } catch (Exception e) {
+            return "";
         }
     }
 
