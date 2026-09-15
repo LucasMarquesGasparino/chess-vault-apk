@@ -51,3 +51,7 @@ label { font-size:13px; color:var(--dim); display:block; }
 footer { position:fixed; bottom:0; left:0; right:0; background:#0d0c0b; border-top:1px solid var(--line);
   padding:8px 12px; font-size:11px; color:var(--dim); text-align:center; }
 .err-mark { color:var(--red); font-weight:700; }
+.sync-progress { background:#121a12; border:1px solid var(--green); border-radius:10px; padding:10px; margin-top:10px; }
+.sync-status { font-weight:700; font-size:13px; color:#7ee787; }
+.green { color:#7ee787 !important; }
+button.sec { background:#22201d; color:var(--txt); border:1px solid var(--line); }

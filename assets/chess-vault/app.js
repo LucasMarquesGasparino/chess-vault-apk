@@ -31,13 +31,26 @@
   function loadCfg() {
     try {
       var cfg = JSON.parse(A.getAllConfig());
-      if (cfg.username) $('cfgUser').value = cfg.username;
+      if (cfg.username) {
+        $('cfgUser').value = cfg.username;
+      } else {
+        $('cfgUser').value = 'LuckGaspar';
+      }
+      var isFullDone = cfg.full_sync_completed === 'true';
+      if (isFullDone) {
+        $('btnFullSync').classList.add('hidden');
+        $('fullSyncBadge').classList.remove('hidden');
+        $('fullSyncBadge').textContent = '✓ Histórico completo sincronizado' + (cfg.full_sync_date ? ' (' + cfg.full_sync_date + ')' : '');
+      } else {
+        $('btnFullSync').classList.remove('hidden');
+        $('fullSyncBadge').classList.add('hidden');
+      }
       var auto = cfg.auto_sync_enabled !== 'false';
       $('syncInfo').textContent = 'Total no cofre: ' + (cfg.total_games || 0) +
         ' • último sync: ' + (cfg.last_sync_human || 'nunca') +
         ' • próximo: ' + (cfg.next_alarm_human || '—') +
         ' • auto: ' + (auto ? 'ON' : 'OFF');
-      $('hdrSub').textContent = cfg.username ? '@' + cfg.username + ' • ' + (cfg.total_games || 0) + ' partidas' : 'sincronize suas partidas';
+      $('hdrSub').textContent = (cfg.username || 'LuckGaspar') + ' • ' + (cfg.total_games || 0) + ' partidas';
     } catch (e) {}
   }
 
@@ -226,13 +239,22 @@
     $('mvLast').addEventListener('click', function () { plyIdx = histSans.length; renderPly({}); });
     $('mvFlip').addEventListener('click', function () { flipState = !flipState; renderPly({}); });
     $('btnSaveUser').addEventListener('click', function () {
-      var u = ($('cfgUser').value || '').trim().toLowerCase();
+      var u = ($('cfgUser').value || '').trim();
       if (!u) { toast('Digite o username'); return; }
       A.saveConfig('username', u);
       toast('Salvo: ' + u);
       loadCfg();
     });
-    $('btnSync').addEventListener('click', function () { A.triggerSync(); toast('Sync iniciado…'); pollSync(); });
+    $('btnFullSync').addEventListener('click', function () {
+      A.triggerFullSync();
+      toast('Iniciando histórico completo…');
+      startSyncProgressPoll();
+    });
+    $('btnSync').addEventListener('click', function () {
+      A.triggerIncrementalSync();
+      toast('Sincronizando recentes…');
+      startSyncProgressPoll();
+    });
     $('btnAutoOn').addEventListener('click', function () { A.scheduleSync(); setTimeout(loadCfg, 800); });
     $('btnAutoOff').addEventListener('click', function () { A.cancelSync(); setTimeout(loadCfg, 800); });
     $('btnExport').addEventListener('click', function () {
@@ -245,22 +267,49 @@
       if (confirm('Apagar todas as partidas do cofre?')) { A.clearAll(); toast('Cofre apagado'); refresh(); }
     });
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) { loadCfg(); loadStats(); }
+      if (!document.hidden) { loadCfg(); loadStats(); checkActiveSync(); }
     });
   }
 
-  function pollSync() {
-    var n = 0;
-    var iv = setInterval(function () {
-      n++;
-      loadCfg(); loadStats();
-      if (n > 20) clearInterval(iv);
-    }, 3000);
+  var syncIv = null;
+  function startSyncProgressPoll() {
+    if (syncIv) clearInterval(syncIv);
+    $('syncProgressWrap').classList.remove('hidden');
+    syncIv = setInterval(function () {
+      var p = {};
+      try { p = JSON.parse(A.getSyncProgress()); } catch (e) {}
+      if (p && p.is_syncing) {
+        var pct = p.total_months > 0 ? Math.round((p.current_month / p.total_months) * 100) : 0;
+        $('syncProgressBar').style.width = pct + '%';
+        $('syncStatus').textContent = (p.mode === 'full' ? '📥 Histórico: ' : '🔄 Recentes: ') +
+          (p.status_message || (p.current_month + '/' + p.total_months));
+        $('syncDetail').textContent = (p.games_inserted || 0) + ' partidas importadas • ' + pct + '%';
+      } else {
+        clearInterval(syncIv);
+        syncIv = null;
+        setTimeout(function () {
+          $('syncProgressWrap').classList.add('hidden');
+        }, 2500);
+        if (p && p.last_error) {
+          toast('Erro no sync: ' + p.last_error);
+        } else {
+          toast('Sync concluído: +' + (p && p.games_inserted ? p.games_inserted : 0) + ' partidas');
+        }
+        refresh();
+      }
+    }, 800);
+  }
+
+  function checkActiveSync() {
+    try {
+      var p = JSON.parse(A.getSyncProgress());
+      if (p && p.is_syncing) startSyncProgressPoll();
+    } catch (e) {}
   }
 
   function refresh() { loadCfg(); loadStats(); loadGames(true); }
 
   document.addEventListener('DOMContentLoaded', function () {
-    tabs(); wire(); refresh();
+    tabs(); wire(); refresh(); checkActiveSync();
   });
 })();

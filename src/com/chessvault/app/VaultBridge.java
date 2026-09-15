@@ -45,10 +45,13 @@ public class VaultBridge {
     public String getAllConfig() {
         try {
             JSONObject o = new JSONObject();
-            String[] keys = new String[]{"username", "auto_sync_enabled", "last_sync_human", "next_alarm_human"};
+            String[] keys = new String[]{"username", "auto_sync_enabled", "last_sync_human", "next_alarm_human", "full_sync_completed", "full_sync_date"};
             for (String k : keys) {
                 String v = db.getConfig(k);
                 if (v != null) o.put(k, v);
+            }
+            if (!o.has("username") || o.optString("username").trim().isEmpty()) {
+                o.put("username", "LuckGaspar");
             }
             o.put("total_games", db.countGames());
             return o.toString();
@@ -110,9 +113,26 @@ public class VaultBridge {
     }
 
     @JavascriptInterface
+    public String getSyncProgress() {
+        return SyncService.SyncProgress.toJson().toString();
+    }
+
+    @JavascriptInterface
     public void triggerSync() {
+        triggerIncrementalSync();
+    }
+
+    @JavascriptInterface
+    public void triggerFullSync() {
         activity.runOnUiThread(new Runnable() {
-            @Override public void run() { activity.startSyncService(); }
+            @Override public void run() { activity.startSyncService("full"); }
+        });
+    }
+
+    @JavascriptInterface
+    public void triggerIncrementalSync() {
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() { activity.startSyncService("incremental"); }
         });
     }
 

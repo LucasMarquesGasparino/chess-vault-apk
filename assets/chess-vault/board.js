@@ -5,8 +5,10 @@
  */
 (function () {
   'use strict';
-  var PIECES = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
-                 K: '♚', Q: '♛', R: '♜', B: '♝', N: '♞', P: '♟' };
+  var PIECES = {
+    w: { k: '♔', q: '♕', r: '♖', b: '♗', n: '♘', p: '♙' },
+    b: { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' }
+  };
   var LIGHT = '#eeeed2', DARK = '#769656';
   var HL_FROM = 'rgba(255,255,0,0.45)', HL_TO = 'rgba(255,255,0,0.30)';
 
@@ -59,7 +61,7 @@
     for (var r = 0; r < 8; r++) {
       for (var c = 0; c < 8; c++) {
         var name = sqName(r, c, this.flipped);
-        var isLight = ((r + c) % 2 === 0) === !this.flipped ? ((r + c) % 2 === 1) : ((r + c) % 2 === 0);
+        var isLight = (r + c) % 2 === 0;
         ctx.fillStyle = isLight ? LIGHT : DARK;
         ctx.fillRect(c * sq, r * sq, sq, sq);
         if (this.lastMove && (name === this.lastMove.from || name === this.lastMove.to)) {
@@ -67,7 +69,7 @@
           ctx.fillRect(c * sq, r * sq, sq, sq);
         }
         if (this.errSquare && name === this.errSquare) {
-          ctx.fillStyle = 'rgba(224,92,92,0.55)';
+          ctx.fillStyle = 'rgba(224,92,92,0.60)';
           ctx.fillRect(c * sq, r * sq, sq, sq);
         }
         var piece = null;
@@ -75,18 +77,26 @@
           var pr = this.flipped ? 7 - r : r;
           var pc = this.flipped ? 7 - c : c;
           var cell = this.position[pr] && this.position[pr][pc];
-          if (cell) piece = { type: cell.type, color: cell.color };
+          if (cell) piece = { type: cell.type.toLowerCase(), color: cell.color };
         }
         if (piece) {
-          var glyph = PIECES[piece.color === 'w' ? piece.type.toUpperCase() : piece.type];
-          var white = piece.color === 'w';
-          ctx.font = Math.round(sq * 0.72) + 'px serif';
-          ctx.lineWidth = Math.max(1, sq * 0.04);
-          ctx.strokeStyle = white ? '#222' : '#f5f5f5';
-          ctx.fillStyle = white ? '#fafafa' : '#1a1a1a';
+          var isW = piece.color === 'w';
+          var glyph = (PIECES[piece.color] && PIECES[piece.color][piece.type]) || piece.type.toUpperCase();
+          ctx.font = Math.round(sq * 0.72) + 'px "DejaVu Sans", "Segoe UI Symbol", "Apple Symbols", serif';
           var x = c * sq + sq / 2, y = r * sq + sq / 2 + sq * 0.03;
-          ctx.strokeText(glyph, x, y);
-          ctx.fillText(glyph, x, y);
+          if (isW) {
+            ctx.lineWidth = Math.max(1.5, sq * 0.05);
+            ctx.strokeStyle = '#1b1b1b';
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeText(glyph, x, y);
+            ctx.fillText(glyph, x, y);
+          } else {
+            ctx.lineWidth = Math.max(1.2, sq * 0.04);
+            ctx.strokeStyle = '#ffffff';
+            ctx.fillStyle = '#1c1b19';
+            ctx.strokeText(glyph, x, y);
+            ctx.fillText(glyph, x, y);
+          }
         }
       }
     }

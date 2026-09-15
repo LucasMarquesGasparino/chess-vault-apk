@@ -163,17 +163,24 @@ public final class MainActivity extends Activity {
         }
     }
 
-    public void startSyncService() {
+    public void startSyncService(String mode) {
         try {
             Intent svc = new Intent(this, SyncService.class);
-            try { startService(svc); } catch (Exception e) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc);
-                else startService(svc);
+            if (mode != null) svc.putExtra(SyncService.EXTRA_SYNC_MODE, mode);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(svc);
+            } else {
+                startService(svc);
             }
-            Toast.makeText(this, "Sincronizando partidas...", Toast.LENGTH_SHORT).show();
+            String msg = "full".equalsIgnoreCase(mode) ? "Iniciando histórico completo..." : "Sincronizando partidas recentes...";
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
-            Toast.makeText(this, "Falha ao sincronizar: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Falha ao iniciar sincronização: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    public void startSyncService() {
+        startSyncService(null);
     }
 
     public void scheduleAlarm() {

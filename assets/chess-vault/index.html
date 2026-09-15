@@ -72,13 +72,20 @@
   <div class="card">
     <h3>Conta chess.com</h3>
     <label>Username
-      <input id="cfgUser" type="text" placeholder="ex: luckgaspar" autocapitalize="off" spellcheck="false">
+      <input id="cfgUser" type="text" placeholder="ex: LuckGaspar" autocapitalize="off" spellcheck="false">
     </label>
     <div class="row">
-      <button id="btnSaveUser">Salvar</button>
-      <button id="btnSync">🔄 Sincronizar agora</button>
+      <button id="btnSaveUser" class="sec">Salvar</button>
+      <button id="btnFullSync">📥 Sincronizar Histórico Completo</button>
+      <button id="btnSync">🔄 Sincronizar Recentes</button>
     </div>
-    <p class="hint">O sync baixa os arquivos mensais públicos da API e guarda no cofre local. Sem login, sem chave.</p>
+    <div id="fullSyncBadge" class="hint green hidden" style="margin-top:8px;">✓ Histórico completo já sincronizado.</div>
+    <div id="syncProgressWrap" class="sync-progress hidden">
+      <div class="sync-status" id="syncStatus">Sincronizando: iniciando...</div>
+      <div class="bar"><div id="syncProgressBar" style="width:0%"></div></div>
+      <div class="hint" id="syncDetail" style="margin-top:4px;">Aguardando...</div>
+    </div>
+    <p class="hint" style="margin-top:8px;">O sync baixa os arquivos públicos da API e guarda no cofre local. Sem login, sem chave.</p>
   </div>
   <div class="card">
     <h3>Sync automático (9h e 21h Brasília)</h3>

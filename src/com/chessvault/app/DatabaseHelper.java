@@ -10,7 +10,7 @@ import org.json.JSONObject;
 
 public class DatabaseHelper extends SQLiteOpenHelper {
     private static final String DB_NAME = "chess_vault.db";
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 2;
 
     public DatabaseHelper(Context ctx) {
         super(ctx, DB_NAME, null, DB_VERSION);
@@ -57,10 +57,27 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_eco ON games(eco_name)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_result ON games(my_result)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_errphase ON games(err_phase)");
+
+        db.execSQL("CREATE TABLE IF NOT EXISTS synced_archives (" +
+                "url TEXT PRIMARY KEY," +
+                "year_month TEXT," +
+                "games_count INTEGER," +
+                "is_complete INTEGER," +
+                "synced_at INTEGER)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_ym ON synced_archives(year_month)");
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        if (oldVersion < 2) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS synced_archives (" +
+                    "url TEXT PRIMARY KEY," +
+                    "year_month TEXT," +
+                    "games_count INTEGER," +
+                    "is_complete INTEGER," +
+                    "synced_at INTEGER)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_ym ON synced_archives(year_month)");
+        }
     }
 
     public synchronized void putConfig(String key, String value) {
@@ -82,7 +99,9 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     public synchronized String getConfig(String key, String def) {
         String v = getConfig(key);
-        return v != null ? v : def;
+        if (v != null && !v.trim().isEmpty()) return v;
+        if ("username".equals(key) && (def == null || def.isEmpty())) return "LuckGaspar";
+        return def;
     }
 
     public synchronized int insertGames(JSONArray arr) {
@@ -304,8 +323,42 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         } finally { c.close(); }
     }
 
+    public synchronized boolean isArchiveSynced(String url) {
+        if (url == null) return false;
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT is_complete FROM synced_archives WHERE url=? AND is_complete=1", new String[]{url});
+        try {
+            return c.moveToFirst();
+        } finally { c.close(); }
+    }
+
+    public synchronized void markArchiveSynced(String url, String yearMonth, int count, boolean isComplete) {
+        if (url == null) return;
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("url", url);
+        cv.put("year_month", yearMonth);
+        cv.put("games_count", count);
+        cv.put("is_complete", isComplete ? 1 : 0);
+        cv.put("synced_at", System.currentTimeMillis());
+        db.insertWithOnConflict("synced_archives", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    public synchronized int getSyncedArchivesCount() {
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT COUNT(*) FROM synced_archives WHERE is_complete=1", null);
+        try {
+            if (c.moveToFirst()) return c.getInt(0);
+            return 0;
+        } finally { c.close(); }
+    }
+
     public synchronized void clearAll() {
         SQLiteDatabase db = getWritableDatabase();
-        try { db.execSQL("DELETE FROM games"); } catch (Exception ignored) {}
+        try {
+            db.execSQL("DELETE FROM games");
+            db.execSQL("DELETE FROM synced_archives");
+            db.execSQL("DELETE FROM config WHERE key IN ('last_sync_human','full_sync_completed','full_sync_date')");
+        } catch (Exception ignored) {}
     }
 }

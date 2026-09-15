@@ -34,6 +34,12 @@ public class GameParserTest {
         check(p2.clocksSec.isEmpty(), "noclock sem relogios");
         check(p2.moveCount == 3, "noclock 3 lances");
 
+        String pgnCrlf = "[Event \"Live Chess\"]\r\n[Site \"Chess.com\"]\r\n[Result \"1-0\"]\r\n\r\n1. e4 e5 2. Nf3 Nc6 1-0";
+        com.chessvault.app.GameParser.Parsed pCrlf =
+                com.chessvault.app.GameParser.parseMoves(pgnCrlf);
+        check(pCrlf.movesSan.size() == 4, "crlf 4 plies, got=" + pCrlf.movesSan.size());
+        check(pCrlf.movesSan.get(0).equals("e4"), "crlf primeiro lance e4");
+
         check(com.chessvault.app.GameParser.parseMoves(null).movesSan.isEmpty(), "null vazio");
 
         check(com.chessvault.app.GameParser.phaseForMoveNum(8).equals("abertura"), "fase L8");

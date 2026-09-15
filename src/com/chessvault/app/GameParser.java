@@ -28,8 +28,9 @@ public final class GameParser {
     public static Parsed parseMoves(String pgn) {
         Parsed p = new Parsed();
         if (pgn == null) return p;
-        int bodyStart = pgn.indexOf("\n\n");
-        String body = bodyStart >= 0 ? pgn.substring(bodyStart) : pgn;
+        String cleanPgn = pgn.replace("\r\n", "\n").replace('\r', '\n');
+        int bodyStart = cleanPgn.indexOf("\n\n");
+        String body = bodyStart >= 0 ? cleanPgn.substring(bodyStart + 2) : cleanPgn.replaceAll("(?m)^\\[[^\\]]*\\]\\s*", "");
         Matcher clkM = CLK.matcher(body);
         while (clkM.find()) {
             try {
@@ -39,12 +40,13 @@ public final class GameParser {
                 p.clocksSec.add(s);
             } catch (Exception ignored) {}
         }
-        String noComments = body.replaceAll("\\{[^}]*\\}", " ");
+        String noComments = body.replaceAll("(?s)\\{[^}]*\\}", " ");
         noComments = noComments.replaceAll("\\$\\d+", " ");
         noComments = MOVE_NUM.matcher(noComments).replaceAll(" ");
         Matcher m = SAN_TOKEN.matcher(noComments);
         while (m.find()) {
-            String tok = m.group();
+            String tok = m.group().trim();
+            if (tok.isEmpty()) continue;
             if (RESULT_TOK.matcher(tok).matches()) break;
             if (tok.equals("...")) continue;
             p.movesSan.add(tok);
