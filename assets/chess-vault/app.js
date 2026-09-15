@@ -139,14 +139,33 @@
     }
   }
 
+  function chessNew() {
+    try {
+      if (typeof Chess === 'function') return new Chess();
+    } catch (e) {}
+    try {
+      if (window.Chess && typeof window.Chess === 'function') return new window.Chess();
+    } catch (e) {}
+    return null;
+  }
+
+  function loadPgnCompat(chess, pgn) {
+    try {
+      if (chess.load_pgn) return chess.load_pgn(pgn);
+      if (chess.loadPgn) return chess.loadPgn(pgn);
+      if (chess.load) return chess.load(pgn);
+    } catch (e) {}
+    return false;
+  }
+
   function movesFromGame(g) {
     try {
       var m = JSON.parse(g.moves_san || '[]');
       if (m && m.length) return m;
     } catch (e) {}
     try {
-      var chess = new Chess();
-      if (chess.load_pgn(g.pgn || '')) return chess.history();
+      var chess = chessNew();
+      if (chess && loadPgnCompat(chess, g.pgn || '')) return chess.history();
     } catch (e) {}
     return [];
   }
@@ -171,10 +190,11 @@
       try { A.openExternal(g.url); } catch (e) {}
     });
     try {
-      chess = new Chess();
-      var ok = chess.load_pgn(g.pgn || '');
+      chess = chessNew();
+      var ok = chess ? loadPgnCompat(chess, g.pgn || '') : false;
+      if (!chess) toast('Motor de xadrez não carregou');
       histSans = ok ? chess.history() : movesFromGame(g);
-    } catch (e) { histSans = []; try { chess = new Chess(); } catch (e2) {} }
+    } catch (e) { histSans = []; try { chess = chessNew(); } catch (e2) {} }
     if (!histSans.length) histSans = movesFromGame(g);
     plyIdx = 0; flipState = (g.my_color === 'black');
     errPlyIdx = (g.err_move_num != null && g.err_move_num !== 'null')
@@ -186,7 +206,8 @@
   }
 
   function chessAtPly(n) {
-    var c = new Chess();
+    var c = chessNew();
+    if (!c) return null;
     for (var i = 0; i < n && i < histSans.length; i++) {
       try { c.move(histSans[i]); } catch (e) { break; }
     }
@@ -194,7 +215,9 @@
   }
 
   function renderPly(g) {
+    if (!board) { try { board = new ChessBoard('board'); } catch (e) { toast('Tabuleiro não iniciou'); return; } }
     var c = chessAtPly(plyIdx);
+    if (!c) { toast('Motor de xadrez não carregou'); return; }
     var lastMove = null;
     if (plyIdx > 0) {
       try {
