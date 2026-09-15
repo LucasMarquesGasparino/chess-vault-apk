@@ -84,6 +84,20 @@ public class VaultBridge {
     }
 
     @JavascriptInterface
+    public String queryGames(String filterJson, int limit, int offset) {
+        try {
+            return db.queryGames(filterJson, limit, offset).toString();
+        } catch (Exception e) { return "[]"; }
+    }
+
+    @JavascriptInterface
+    public int countFilteredGames(String filterJson) {
+        try {
+            return db.countFilteredGames(filterJson);
+        } catch (Exception e) { return 0; }
+    }
+
+    @JavascriptInterface
     public String getGame(String uuid) {
         try {
             JSONObject g = db.getGame(uuid);

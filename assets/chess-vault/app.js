@@ -5,6 +5,8 @@
   var PAGE = 20, pgOffset = 0;
   var board = null, chess = null, histSans = [], plyIdx = 0, errPlyIdx = -1, flipState = false;
   var touchTimer = null;
+  var activeFilter = null, activeFilterLabel = '';
+  var analyzeMode = false, analyzeChess = null, analyzeSans = [];
 
   function $(id) { return document.getElementById(id); }
   function toast(m) { try { A && A.showToast(m); } catch (e) {} }
@@ -59,54 +61,100 @@
     try { s = JSON.parse(A.getStats()); } catch (e) {}
     var cards = '';
     cards += card(s.total || 0, 'partidas no cofre');
-    cards += card(s.timeout_losses || 0, 'derrotas por tempo');
-    cards += card(s.mate_losses || 0, 'mates recebidos');
+    cards += linkCard(s.timeout_losses || 0, 'derrotas por tempo', { loss_kind: 'timeout' }, 'derrotas por tempo');
+    cards += linkCard(s.mate_losses || 0, 'mates recebidos', { loss_kind: 'mate' }, 'mates recebidos');
     cards += card(s.avg_accuracy != null ? s.avg_accuracy : '—', 'accuracy média');
     $('dashCards').innerHTML = cards;
     var tc = '';
     (s.by_time_class || []).forEach(function (t) {
       var tot = t.games || 1;
       var w = Math.round((t.wins / tot) * 100), d = Math.round((t.draws / tot) * 100), l = 100 - w - d;
-      tc += '<div class="card"><b>' + esc(t.time_class) + '</b> <span class="hint">' + t.games + ' jogos • rating médio ' + t.avg_rating +
+      tc += '<div class="card linkable" data-f=\'' + esc(JSON.stringify({ time_class: t.time_class })) + '\' data-l="ritmo ' + esc(t.time_class) + '">' +
+        '<b>' + esc(t.time_class) + '</b> <span class="hint">' + t.games + ' jogos • rating médio ' + t.avg_rating +
         (t.avg_accuracy != null ? ' • acc ' + t.avg_accuracy : '') + '</b><div class="bar"><div class="w" style="width:' + w + '%"></div></div>' +
         '<div class="hint">' + t.wins + 'V / ' + t.losses + 'D / ' + t.draws + 'E</div></div>';
     });
     $('byTc').innerHTML = tc || '<div class="card dim">Sem dados — sincronize.</div>';
+    wireFilterCards($('byTc'));
     var cc = '';
     (s.by_color || []).forEach(function (t) {
-      cc += '<div class="card"><b>' + (t.color === 'white' ? '♔ Brancas' : '♚ Pretas') + '</b><div class="hint">' +
+      cc += '<div class="card linkable" data-f=\'' + esc(JSON.stringify({ color: t.color })) + '\' data-l="de ' + (t.color === 'white' ? 'brancas' : 'pretas') + '">' +
+        '<b>' + (t.color === 'white' ? '♔ Brancas' : '♚ Pretas') + '</b><div class="hint">' +
         t.games + ' jogos • ' + t.wins + 'V / ' + t.losses + 'D / ' + t.draws + 'E</div></div>';
     });
     $('byColor').innerHTML = cc || '';
-    var lt = '<div class="cards">' + card(s.mate_losses || 0, 'xeque-mate') +
-      card(s.resigns || 0, 'desistências') + card(s.timeout_losses || 0, 'tempo esgotado') + '</div>';
+    wireFilterCards($('byColor'));
+    var lt = '<div class="cards">' + linkCard(s.mate_losses || 0, 'xeque-mate', { loss_kind: 'mate' }, 'xeque-mate') +
+      linkCard(s.resigns || 0, 'desistências', { loss_kind: 'resign' }, 'desistências') +
+      linkCard(s.timeout_losses || 0, 'tempo esgotado', { loss_kind: 'timeout' }, 'tempo esgotado') + '</div>';
     $('lossTypes').innerHTML = lt;
+    wireFilterCards($('lossTypes'));
+    wireFilterCards($('dashCards'));
     var ol = '';
     (s.openings || []).forEach(function (o) {
       var tot = o.games || 1;
       var wr = Math.round((o.wins / tot) * 100);
       var crisis = (o.games >= 5 && wr < 35) ? ' <span class="err-mark">em crise</span>' : '';
-      ol += '<tr><td>' + esc(shortEco(o.eco)) + crisis + '</td><td>' + o.games + '</td><td>' +
+      ol += '<tr class="linkable" data-f=\'' + esc(JSON.stringify({ eco: o.eco })) + '\' data-l="abertura ' + esc(shortEco(o.eco)) + '">' +
+        '<td>' + esc(shortEco(o.eco)) + crisis + '</td><td>' + o.games + '</td><td>' +
         o.wins + '/' + o.losses + '/' + o.draws + '</td><td>' + wr + '%</td></tr>';
     });
     $('openList').innerHTML = '<table class="tbl"><tr><th>Abertura</th><th>J</th><th>V/D/E</th><th>WR</th></tr>' + ol + '</table>';
+    wireFilterCards($('openList'));
     var ep = s.err_by_phase || {};
-    $('errPhase').innerHTML = card(ep.abertura || 0, 'erros na abertura (1–12)') +
-      card(ep.meio || 0, 'erros no meio-jogo (13–30)') + card(ep.final || 0, 'erros no final (31+)');
+    var epCards = linkCard(ep.abertura || 0, 'erros na abertura (1–12)', { err_phase: 'abertura' }, 'erros na abertura') +
+      linkCard(ep.meio || 0, 'erros no meio-jogo (13–30)', { err_phase: 'meio' }, 'erros no meio-jogo') +
+      linkCard(ep.final || 0, 'erros no final (31+)', { err_phase: 'final' }, 'erros no final');
+    $('errPhase').innerHTML = epCards;
+    wireFilterCards($('errPhase'));
     var h = s.err_hist || [], mx = 1;
     h.forEach(function (e) { if (e.count > mx) mx = e.count; });
     var hh = '';
     h.forEach(function (e) {
-      hh += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0;">' +
+      hh += '<div class="linkable" data-f=\'' + esc(JSON.stringify({ err_move: e.move })) + '\' data-l="erro no lance ' + e.move + '"' +
+        ' style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0;">' +
         '<span style="width:34px;color:var(--dim)">L' + e.move + '</span>' +
         '<div class="bar" style="flex:1"><div class="l" style="width:' + Math.round((e.count / mx) * 100) + '%"></div></div>' +
         '<span style="width:30px;text-align:right">' + e.count + '</span></div>';
     });
     $('errHist').innerHTML = hh || '<div class="card dim">Sem mates registrados.</div>';
+    wireFilterCards($('errHist'));
   }
 
   function card(v, l) { return '<div class="card"><div class="big">' + v + '</div><div class="lbl">' + l + '</div></div>'; }
-  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function linkCard(v, l, f, fl) {
+    if (!v) return card(v, l);
+    return '<div class="card linkable" data-f=\'' + esc(JSON.stringify(f)) + '\' data-l="' + esc(fl) + '">' +
+      '<div class="big">' + v + '</div><div class="lbl">' + l + ' →</div></div>';
+  }
+  function wireFilterCards(root) {
+    if (!root) return;
+    var els = root.querySelectorAll ? root.querySelectorAll('.linkable') : [];
+    for (var i = 0; i < els.length; i++) {
+      (function (el) {
+        el.addEventListener('click', function () {
+          var f = null, l = '';
+          try { f = JSON.parse(el.getAttribute('data-f')); } catch (e) {}
+          l = el.getAttribute('data-l') || '';
+          if (f) showFiltered(f, l);
+        });
+      })(els[i]);
+    }
+  }
+  function showFiltered(f, label) {
+    activeFilter = f;
+    activeFilterLabel = label;
+    pgOffset = 0;
+    window.openTab('games');
+    loadGames(true);
+  }
+  function clearFilter() {
+    activeFilter = null;
+    activeFilterLabel = '';
+    pgOffset = 0;
+    loadGames(true);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
   function shortEco(e) {
     e = String(e || '');
     return e.length > 42 ? e.slice(0, 42) + '…' : e;
@@ -120,8 +168,20 @@
   function loadGames(reset) {
     if (reset) { pgOffset = 0; $('gameDetail').classList.add('hidden'); }
     var arr = [];
-    try { arr = JSON.parse(A.getRecentGames(PAGE, pgOffset)); } catch (e) {}
-    var h = '';
+    var filterStr = activeFilter ? JSON.stringify(activeFilter) : null;
+    try {
+      if (filterStr) { arr = JSON.parse(A.queryGames(filterStr, PAGE, pgOffset)); }
+      else { arr = JSON.parse(A.getRecentGames(PAGE, pgOffset)); }
+    } catch (e) {}
+    var banner = '';
+    if (filterStr) {
+      var total = 0;
+      try { total = A.countFilteredGames(filterStr); } catch (e) {}
+      banner = '<div class="card filter-banner">🔎 ' + esc(activeFilterLabel || 'filtrado') +
+        (total ? ' • ' + total + ' partidas' : '') +
+        ' <a href="#" id="clearFilter" style="color:var(--accent)">limpar ✕</a></div>';
+    }
+    var h = banner;
     arr.forEach(function (g) {
       var d = new Date(g.end_time * 1000);
       var ds = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -133,6 +193,8 @@
     });
     $('gameList').innerHTML = h || '<div class="card dim">Nada aqui ainda.</div>';
     $('pgInfo').textContent = (pgOffset + 1) + '–' + (pgOffset + arr.length);
+    var cf = $('clearFilter');
+    if (cf) cf.addEventListener('click', function (ev) { ev.preventDefault(); clearFilter(); });
     var items = document.querySelectorAll('.gitem');
     for (var i = 0; i < items.length; i++) {
       items[i].addEventListener('click', function () { openGame(this.getAttribute('data-uuid')); });
@@ -201,6 +263,7 @@
       ? Math.max(0, (parseInt(g.err_move_num, 10) - 1) * 2 + (g.my_color === 'white' ? 0 : 1)) : -1;
     if (!board) board = new ChessBoard('board');
     board.flipped = flipState;
+    exitAnalyze();
     renderPly(g);
     window.__boardSwipe = function (dir) { stepPly(dir, g); };
   }
@@ -242,8 +305,85 @@
   }
 
   function stepPly(d, g) {
+    if (analyzeMode) { analyzeRedo(d); return; }
     plyIdx = Math.max(0, Math.min(histSans.length, plyIdx + d));
     renderPly(g || {});
+  }
+
+  function enterAnalyze() {
+    var base = chessAtPly(plyIdx);
+    if (!base) { toast('Motor de xadrez não carregou'); return; }
+    analyzeMode = true;
+    analyzeChess = base;
+    analyzeSans = [];
+    $('analyzePanel').classList.remove('hidden');
+    $('btnAnalyzeExit').classList.remove('hidden');
+    $('btnAnalyze').classList.add('hidden');
+    renderAnalyze();
+  }
+  function exitAnalyze() {
+    analyzeMode = false;
+    analyzeChess = null;
+    analyzeSans = [];
+    var p = $('analyzePanel');
+    if (p) p.classList.add('hidden');
+    var e = $('btnAnalyzeExit');
+    if (e) e.classList.add('hidden');
+    var b = $('btnAnalyze');
+    if (b) b.classList.remove('hidden');
+  }
+  function renderAnalyze() {
+    if (!analyzeChess || !board) return;
+    var lastMove = null;
+    try {
+      var verbose = analyzeChess.history({ verbose: true });
+      var v = verbose[verbose.length - 1];
+      if (v) lastMove = { from: v.from, to: v.to };
+    } catch (e) {}
+    board.setFromChess(analyzeChess, lastMove, null);
+    var turn = 'brancas';
+    try { turn = analyzeChess.turn() === 'w' ? 'brancas' : 'pretas'; } catch (e) {}
+    var fen = '';
+    try { fen = analyzeChess.fen(); } catch (e) {}
+    $('analyzeFen').textContent = '🔬 análise • jogam ' + turn + (fen ? ' • ' + fen : '') +
+      (analyzeSans.length ? ' • ' + analyzeSans.join(' ') : '');
+    var moves = [];
+    try { moves = analyzeChess.moves(); } catch (e) {}
+    var h = '';
+    var seen = {};
+    for (var i = 0; i < moves.length && h.length < 3000; i++) {
+      var san = moves[i];
+      if (seen[san]) continue;
+      seen[san] = 1;
+      h += '<button class="sec an-mv" data-san="' + esc(san) + '">' + esc(san) + '</button>';
+    }
+    $('analyzeMoves').innerHTML = h || '<span class="hint">sem lances legais (fim de jogo?)</span>';
+    var btns = document.querySelectorAll('.an-mv');
+    for (var j = 0; j < btns.length; j++) {
+      (function (el) {
+        el.addEventListener('click', function () { analyzePlay(el.getAttribute('data-san')); });
+      })(btns[j]);
+    }
+    $('mvInfo').textContent = 'análise • ' + analyzeSans.length + ' lances livres';
+  }
+  function analyzePlay(san) {
+    if (!analyzeChess) return;
+    try {
+      var mv = analyzeChess.move(san);
+      if (!mv) { toast('Lance ilegal'); return; }
+      analyzeSans.push(mv.san || san);
+      renderAnalyze();
+    } catch (e) { toast('Lance ilegal'); }
+  }
+  function analyzeRedo(d) {
+    if (!analyzeChess) return;
+    if (d < 0) {
+      try {
+        var u = analyzeChess.undo();
+        if (u) analyzeSans.pop();
+      } catch (e) {}
+    }
+    renderAnalyze();
   }
 
   function wireBoard(g) { return g; }
@@ -256,11 +396,15 @@
       $('gameList').style.display = '';
       document.querySelector('.pager').style.display = '';
     });
-    $('mvFirst').addEventListener('click', function () { plyIdx = 0; renderPly({}); });
-    $('mvPrev').addEventListener('click', function () { plyIdx = Math.max(0, plyIdx - 1); renderPly({}); });
+    $('mvFirst').addEventListener('click', function () { if (analyzeMode) return; plyIdx = 0; renderPly({}); });
+    $('mvPrev').addEventListener('click', function () { if (analyzeMode) { analyzeRedo(-1); return; } plyIdx = Math.max(0, plyIdx - 1); renderPly({}); });
     $('mvNext').addEventListener('click', function () { plyIdx = Math.min(histSans.length, plyIdx + 1); renderPly({}); });
-    $('mvLast').addEventListener('click', function () { plyIdx = histSans.length; renderPly({}); });
-    $('mvFlip').addEventListener('click', function () { flipState = !flipState; renderPly({}); });
+    $('mvLast').addEventListener('click', function () { if (analyzeMode) return; plyIdx = histSans.length; renderPly({}); });
+    $('mvFlip').addEventListener('click', function () { flipState = !flipState; if (analyzeMode) renderAnalyze(); else renderPly({}); });
+    $('btnAnalyze').addEventListener('click', function () { enterAnalyze(); });
+    $('btnAnalyzeExit').addEventListener('click', function () { exitAnalyze(); renderPly({}); });
+    $('btnUndoAn').addEventListener('click', function () { analyzeRedo(-1); });
+    $('btnResetAn').addEventListener('click', function () { enterAnalyze(); });
     $('btnSaveUser').addEventListener('click', function () {
       var u = ($('cfgUser').value || '').trim();
       if (!u) { toast('Digite o username'); return; }

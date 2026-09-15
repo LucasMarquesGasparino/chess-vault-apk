@@ -63,6 +63,20 @@
         <button id="mvLast">⏭</button>
         <button id="mvFlip">🔄</button>
       </div>
+      <div id="analyzeBox" style="margin-top:10px;">
+        <div class="row">
+          <button id="btnAnalyze" class="sec">🔬 Analisar posição</button>
+          <button id="btnAnalyzeExit" class="sec hidden">✕ Sair da análise</button>
+        </div>
+        <div id="analyzePanel" class="hidden" style="margin-top:8px;">
+          <div class="hint" id="analyzeFen" style="word-break:break-all;"></div>
+          <div class="row" id="analyzeMoves" style="margin-top:6px;"></div>
+          <div class="row" style="margin-top:6px;">
+            <button id="btnUndoAn" class="sec">↩ Desfazer</button>
+            <button id="btnResetAn" class="sec">⏮ Posição inicial</button>
+          </div>
+        </div>
+      </div>
       <div id="gdMeta"></div>
     </div>
   </div>

@@ -267,15 +267,36 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized JSONArray getRecentGames(int limit, int offset) {
+        return queryGames(null, limit, offset);
+    }
+
+    public synchronized int countFilteredGames(String filterJson) {
+        Filter f = Filter.parse(filterJson);
+        SQLiteDatabase db = getReadableDatabase();
+        String[] a = f.args.toArray(new String[f.args.size()]);
+        Cursor c = db.rawQuery("SELECT COUNT(*) FROM games" + f.where, a);
+        try {
+            if (c.moveToFirst()) return c.getInt(0);
+            return 0;
+        } finally { c.close(); }
+    }
+
+    public synchronized JSONArray queryGames(String filterJson, int limit, int offset) {
+        Filter f = Filter.parse(filterJson);
         JSONArray arr = new JSONArray();
         SQLiteDatabase db = getReadableDatabase();
         int lim = Math.max(1, Math.min(limit <= 0 ? 20 : limit, 100));
         int off = Math.max(0, offset);
+        String[] args = new String[f.args.size() + 2];
+        for (int i = 0; i < f.args.size(); i++) args[i] = f.args.get(i);
+        args[f.args.size()] = String.valueOf(lim);
+        args[f.args.size() + 1] = String.valueOf(off);
         Cursor c = db.rawQuery(
             "SELECT uuid, url, end_time, end_date, time_class, time_control, my_color, " +
             "my_rating, opp_username, opp_rating, my_result, is_win, is_loss, is_draw, " +
-            "eco_name, accuracy, move_count FROM games ORDER BY end_time DESC LIMIT ? OFFSET ?",
-            new String[]{String.valueOf(lim), String.valueOf(off)});
+            "eco_name, accuracy, move_count FROM games" + f.where +
+            " ORDER BY end_time DESC LIMIT ? OFFSET ?",
+            args);
         try {
             while (c.moveToNext()) {
                 JSONObject g = new JSONObject();
@@ -302,6 +323,61 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             }
         } finally { c.close(); }
         return arr;
+    }
+
+    private static final class Filter {
+        String where = "";
+        java.util.ArrayList<String> args = new java.util.ArrayList<String>();
+
+        static Filter parse(String filterJson) {
+            Filter f = new Filter();
+            if (filterJson == null || filterJson.trim().isEmpty() || "{}".equals(filterJson.trim())) return f;
+            try {
+                JSONObject o = new JSONObject(filterJson);
+                java.util.ArrayList<String> conds = new java.util.ArrayList<String>();
+                addEq(o, conds, f.args, "time_class", "time_class");
+                addEq(o, conds, f.args, "color", "my_color");
+                addEq(o, conds, f.args, "eco", "eco_name");
+                addEq(o, conds, f.args, "err_phase", "err_phase");
+                if (o.has("result") && !o.isNull("result")) {
+                    String r = o.optString("result", "");
+                    if ("win".equals(r)) conds.add("is_win=1");
+                    else if ("loss".equals(r)) conds.add("is_loss=1");
+                    else if ("draw".equals(r)) conds.add("is_draw=1");
+                }
+                if (o.has("loss_kind") && !o.isNull("loss_kind")) {
+                    String k = o.optString("loss_kind", "");
+                    if ("mate".equals(k)) conds.add("is_mate_loss=1");
+                    else if ("timeout".equals(k)) conds.add("is_timeout_loss=1");
+                    else if ("resign".equals(k)) conds.add("my_result='resigned'");
+                }
+                if (o.has("err_move") && !o.isNull("err_move")) {
+                    try {
+                        conds.add("err_move_num=" + o.getInt("err_move"));
+                    } catch (Exception ignored) {}
+                }
+                if (!conds.isEmpty()) {
+                    StringBuilder sb = new StringBuilder(" WHERE ");
+                    for (int i = 0; i < conds.size(); i++) {
+                        if (i > 0) sb.append(" AND ");
+                        sb.append(conds.get(i));
+                    }
+                    f.where = sb.toString();
+                }
+            } catch (Exception ignored) {}
+            return f;
+        }
+
+        private static void addEq(JSONObject o, java.util.ArrayList<String> conds,
+                                  java.util.ArrayList<String> args, String jsonKey, String col) {
+            if (o.has(jsonKey) && !o.isNull(jsonKey)) {
+                String v = o.optString(jsonKey, "");
+                if (v != null && !v.isEmpty()) {
+                    conds.add(col + "=?");
+                    args.add(v);
+                }
+            }
+        }
     }
 
     public synchronized JSONObject getGame(String uuid) {
