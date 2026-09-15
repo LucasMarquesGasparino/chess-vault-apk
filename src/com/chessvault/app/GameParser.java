@@ -13,9 +13,9 @@ import java.util.regex.Pattern;
 public final class GameParser {
     private GameParser() {}
 
-    private static final Pattern MOVE_NUM = Pattern.compile("\\d+\\.{1,3}\\s*");
-    private static final Pattern CLK = Pattern.compile("\\{\\[%clk (\\d+):(\\d+):([\\d.]+)\\]}");
-    private static final Pattern SAN_TOKEN = Pattern.compile("[^\\s{}]+");
+    private static final Pattern MOVE_NUM = Pattern.compile("[0-9]+\\.{1,3}[ \\t\\n\\r]*");
+    private static final Pattern CLK = Pattern.compile("\\{\\[%clk ([0-9]+):([0-9]+):([0-9.]+)\\]}");
+    private static final Pattern SAN_TOKEN = Pattern.compile("[^ \\t\\n\\r{}]+");
     private static final Pattern RESULT_TOK = Pattern.compile("^(1-0|0-1|1/2-1/2|\\*)$");
 
     public static final class Parsed {
@@ -30,7 +30,7 @@ public final class GameParser {
         if (pgn == null) return p;
         String cleanPgn = pgn.replace("\r\n", "\n").replace('\r', '\n');
         int bodyStart = cleanPgn.indexOf("\n\n");
-        String body = bodyStart >= 0 ? cleanPgn.substring(bodyStart + 2) : cleanPgn.replaceAll("(?m)^\\[[^\\]]*\\]\\s*", "");
+        String body = bodyStart >= 0 ? cleanPgn.substring(bodyStart + 2) : stripHeaders(cleanPgn);
         Matcher clkM = CLK.matcher(body);
         while (clkM.find()) {
             try {
@@ -40,8 +40,8 @@ public final class GameParser {
                 p.clocksSec.add(s);
             } catch (Exception ignored) {}
         }
-        String noComments = body.replaceAll("(?s)\\{[^}]*\\}", " ");
-        noComments = noComments.replaceAll("\\$\\d+", " ");
+        String noComments = removeComments(body);
+        noComments = removeNags(noComments);
         noComments = MOVE_NUM.matcher(noComments).replaceAll(" ");
         Matcher m = SAN_TOKEN.matcher(noComments);
         while (m.find()) {
@@ -53,6 +53,46 @@ public final class GameParser {
         }
         p.moveCount = (p.movesSan.size() + 1) / 2;
         return p;
+    }
+
+    private static String stripHeaders(String pgn) {
+        StringBuilder sb = new StringBuilder();
+        String[] lines = pgn.split("\n", -1);
+        for (int i = 0; i < lines.length; i++) {
+            String t = lines[i].trim();
+            if (t.startsWith("[")) continue;
+            sb.append(lines[i]);
+            if (i + 1 < lines.length) sb.append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    private static String removeComments(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        int depth = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '{') { depth++; continue; }
+            if (c == '}') { if (depth > 0) depth--; continue; }
+            if (depth == 0) sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    private static String removeNags(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        int i = 0;
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == '$') {
+                int j = i + 1;
+                while (j < s.length() && s.charAt(j) >= '0' && s.charAt(j) <= '9') j++;
+                if (j > i + 1) { sb.append(' '); i = j; continue; }
+            }
+            sb.append(c);
+            i++;
+        }
+        return sb.toString();
     }
 
     /** "rnbqkbnr/..." só conta peças para inferir fase: <=10 fim, <=20 meio? Não: usa moveCount. */
