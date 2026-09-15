@@ -10,7 +10,7 @@ import org.json.JSONObject;
 
 public class DatabaseHelper extends SQLiteOpenHelper {
     private static final String DB_NAME = "chess_vault.db";
-    private static final int DB_VERSION = 3;
+    private static final int DB_VERSION = 4;
 
     public DatabaseHelper(Context ctx) {
         super(ctx, DB_NAME, null, DB_VERSION);
@@ -62,11 +62,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
         db.execSQL("CREATE TABLE IF NOT EXISTS synced_archives (" +
                 "url TEXT PRIMARY KEY," +
+                "owner TEXT DEFAULT ''," +
                 "year_month TEXT," +
                 "games_count INTEGER," +
                 "is_complete INTEGER," +
                 "synced_at INTEGER)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_ym ON synced_archives(year_month)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_owner ON synced_archives(owner)");
     }
 
     @Override
@@ -74,16 +76,104 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         if (oldVersion < 2) {
             db.execSQL("CREATE TABLE IF NOT EXISTS synced_archives (" +
                     "url TEXT PRIMARY KEY," +
+                    "owner TEXT DEFAULT ''," +
                     "year_month TEXT," +
                     "games_count INTEGER," +
                     "is_complete INTEGER," +
                     "synced_at INTEGER)");
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_ym ON synced_archives(year_month)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_owner ON synced_archives(owner)");
         }
         if (oldVersion < 3) {
             try { db.execSQL("ALTER TABLE games ADD COLUMN owner TEXT DEFAULT ''"); } catch (Exception ignored) {}
             try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_owner ON games(owner)"); } catch (Exception ignored) {}
         }
+        if (oldVersion < 4) {
+            try { db.execSQL("ALTER TABLE synced_archives ADD COLUMN owner TEXT DEFAULT ''"); } catch (Exception ignored) {}
+            try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_owner ON synced_archives(owner)"); } catch (Exception ignored) {}
+            migrateLegacyGlobalFlags(db);
+        }
+    }
+
+    public static String normOwner(String owner) {
+        return owner != null ? owner.trim().toLowerCase(java.util.Locale.US) : "";
+    }
+
+    public static String ownerKey(String owner, String base) {
+        String ow = normOwner(owner);
+        return ow.isEmpty() ? base : ("owner:" + ow + ":" + base);
+    }
+
+    private void migrateLegacyGlobalFlags(SQLiteDatabase db) {
+        try {
+            String u1 = null, u2 = null, active = null;
+            Cursor c = db.rawQuery("SELECT key, value FROM config WHERE key IN ('username','secondary_username','active_owner')", null);
+            try {
+                while (c.moveToNext()) {
+                    String k = c.getString(0);
+                    String v = c.getString(1);
+                    if ("username".equals(k)) u1 = v;
+                    else if ("secondary_username".equals(k)) u2 = v;
+                    else if ("active_owner".equals(k)) active = v;
+                }
+            } finally { c.close(); }
+            java.util.ArrayList<String> owners = new java.util.ArrayList<String>();
+            if (u1 != null && !u1.trim().isEmpty()) owners.add(normOwner(u1));
+            if (u2 != null && !u2.trim().isEmpty()) owners.add(normOwner(u2));
+            if (active != null && !active.trim().isEmpty()) owners.add(normOwner(active));
+            Cursor g = db.rawQuery("SELECT DISTINCT owner FROM games WHERE owner<>'' AND owner IS NOT NULL", null);
+            try {
+                while (g.moveToNext()) {
+                    String o = normOwner(g.getString(0));
+                    if (!o.isEmpty() && !owners.contains(o)) owners.add(o);
+                }
+            } finally { g.close(); }
+            String glFull = null, glDate = null, glLast = null;
+            Cursor f = db.rawQuery("SELECT key, value FROM config WHERE key IN ('full_sync_completed','full_sync_date','last_sync_human')", null);
+            try {
+                while (f.moveToNext()) {
+                    String k = f.getString(0);
+                    String v = f.getString(1);
+                    if ("full_sync_completed".equals(k)) glFull = v;
+                    else if ("full_sync_date".equals(k)) glDate = v;
+                    else if ("last_sync_human".equals(k)) glLast = v;
+                }
+            } finally { f.close(); }
+            boolean hadGlobal = (glFull != null || glDate != null || glLast != null);
+            for (String ow : owners) {
+                long n = 0;
+                Cursor cc = db.rawQuery("SELECT COUNT(*) FROM games WHERE owner=?", new String[]{ow});
+                try { if (cc.moveToFirst()) n = cc.getLong(0); } finally { cc.close(); }
+                if (n <= 0) continue;
+                if (hadGlobal) {
+                    if ("true".equals(glFull)) putConfigTx(db, ownerKey(ow, "full_sync_completed"), "true");
+                    if (glDate != null) putConfigTx(db, ownerKey(ow, "full_sync_date"), glDate);
+                    if (glLast != null) putConfigTx(db, ownerKey(ow, "last_sync_human"), glLast);
+                    ContentValues cv = new ContentValues();
+                    cv.put("owner", ow);
+                    db.update("synced_archives", cv, "owner='' OR owner IS NULL", null);
+                } else {
+                    putConfigTx(db, ownerKey(ow, "full_sync_completed"), "true");
+                    db.execSQL("UPDATE synced_archives SET owner=? WHERE owner='' OR owner IS NULL", new String[]{ow});
+                    Cursor m = db.rawQuery("SELECT MAX(end_time) FROM games WHERE owner=?", new String[]{ow});
+                    try {
+                        if (m.moveToFirst() && !m.isNull(0)) {
+                            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
+                            putConfigTx(db, ownerKey(ow, "last_sync_human"), sdf.format(new java.util.Date()));
+                        }
+                    } finally { m.close(); }
+                }
+                break;
+            }
+            db.execSQL("DELETE FROM config WHERE key IN ('full_sync_completed','full_sync_date','last_sync_human')");
+        } catch (Exception ignored) {}
+    }
+
+    private void putConfigTx(SQLiteDatabase db, String key, String value) {
+        ContentValues cv = new ContentValues();
+        cv.put("key", key);
+        cv.put("value", value);
+        db.insertWithOnConflict("config", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
     }
 
     public synchronized void putConfig(String key, String value) {
@@ -179,7 +269,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
     public synchronized int countGamesForOwner(String owner) {
         SQLiteDatabase db = getReadableDatabase();
-        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        String ow = normOwner(owner);
         Cursor c = db.rawQuery("SELECT COUNT(*) FROM games WHERE owner=?", new String[]{ow});
         try {
             if (c.moveToFirst()) return c.getInt(0);
@@ -192,7 +282,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized long getMaxEndTimeForOwner(String owner) {
-        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        String ow = normOwner(owner);
         SQLiteDatabase db = getReadableDatabase();
         Cursor c;
         if (!ow.isEmpty()) {
@@ -215,13 +305,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         if (o == null || o.trim().isEmpty()) {
             o = getConfig("username", "LuckGaspar");
         }
-        return o != null ? o.trim().toLowerCase() : "";
+        return normOwner(o);
     }
 
     public synchronized JSONObject getStatsForOwner(String owner) {
         JSONObject o = new JSONObject();
         SQLiteDatabase db = getReadableDatabase();
-        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        String ow = normOwner(owner);
         String owWhere = " WHERE owner=? ";
         String[] owArg = new String[]{ow};
         try {
@@ -383,7 +473,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         static Filter parse(String filterJson, String owner) {
             Filter f = new Filter();
             java.util.ArrayList<String> conds = new java.util.ArrayList<String>();
-            String ow = owner != null ? owner.trim().toLowerCase() : "";
+            String ow = normOwner(owner);
             if (!ow.isEmpty()) {
                 conds.add("owner=?");
                 f.args.add(ow);
@@ -444,7 +534,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized JSONObject getGameForOwner(String uuid, String owner) {
-        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        String ow = normOwner(owner);
         SQLiteDatabase db = getReadableDatabase();
         Cursor c;
         if (!ow.isEmpty()) {
@@ -469,19 +559,34 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized boolean isArchiveSynced(String url) {
+        return isArchiveSynced(url, null);
+    }
+
+    public synchronized boolean isArchiveSynced(String url, String owner) {
         if (url == null) return false;
+        String ow = normOwner(owner);
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT is_complete FROM synced_archives WHERE url=? AND is_complete=1", new String[]{url});
+        Cursor c;
+        if (!ow.isEmpty()) {
+            c = db.rawQuery("SELECT is_complete FROM synced_archives WHERE url=? AND owner=? AND is_complete=1", new String[]{url, ow});
+        } else {
+            c = db.rawQuery("SELECT is_complete FROM synced_archives WHERE url=? AND is_complete=1", new String[]{url});
+        }
         try {
             return c.moveToFirst();
         } finally { c.close(); }
     }
 
     public synchronized void markArchiveSynced(String url, String yearMonth, int count, boolean isComplete) {
+        markArchiveSynced(url, yearMonth, count, isComplete, null);
+    }
+
+    public synchronized void markArchiveSynced(String url, String yearMonth, int count, boolean isComplete, String owner) {
         if (url == null) return;
         SQLiteDatabase db = getWritableDatabase();
         ContentValues cv = new ContentValues();
         cv.put("url", url);
+        cv.put("owner", normOwner(owner));
         cv.put("year_month", yearMonth);
         cv.put("games_count", count);
         cv.put("is_complete", isComplete ? 1 : 0);
@@ -490,8 +595,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized int getSyncedArchivesCount() {
+        return getSyncedArchivesCountForOwner(null);
+    }
+
+    public synchronized int getSyncedArchivesCountForOwner(String owner) {
+        String ow = normOwner(owner);
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT COUNT(*) FROM synced_archives WHERE is_complete=1", null);
+        Cursor c;
+        if (!ow.isEmpty()) {
+            c = db.rawQuery("SELECT COUNT(*) FROM synced_archives WHERE is_complete=1 AND owner=?", new String[]{ow});
+        } else {
+            c = db.rawQuery("SELECT COUNT(*) FROM synced_archives WHERE is_complete=1", null);
+        }
         try {
             if (c.moveToFirst()) return c.getInt(0);
             return 0;
@@ -503,16 +618,19 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized void clearOwner(String owner) {
-        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        String ow = normOwner(owner);
         SQLiteDatabase db = getWritableDatabase();
         try {
             if (!ow.isEmpty()) {
                 db.execSQL("DELETE FROM games WHERE owner=?", new String[]{ow});
+                db.execSQL("DELETE FROM synced_archives WHERE owner=?", new String[]{ow});
+                db.execSQL("DELETE FROM config WHERE key IN (?,?,?)",
+                    new String[]{ownerKey(ow, "last_sync_human"), ownerKey(ow, "full_sync_completed"), ownerKey(ow, "full_sync_date")});
             } else {
                 db.execSQL("DELETE FROM games");
+                db.execSQL("DELETE FROM synced_archives");
+                db.execSQL("DELETE FROM config WHERE key IN ('last_sync_human','full_sync_completed','full_sync_date')");
             }
-            db.execSQL("DELETE FROM synced_archives");
-            db.execSQL("DELETE FROM config WHERE key IN ('last_sync_human','full_sync_completed','full_sync_date')");
         } catch (Exception ignored) {}
     }
 
@@ -521,7 +639,21 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         try {
             db.execSQL("DELETE FROM games");
             db.execSQL("DELETE FROM synced_archives");
-            db.execSQL("DELETE FROM config WHERE key IN ('last_sync_human','full_sync_completed','full_sync_date')");
+            db.execSQL("DELETE FROM config WHERE key LIKE 'owner:%' OR key IN ('last_sync_human','full_sync_completed','full_sync_date','last_alarm_run')");
         } catch (Exception ignored) {}
+    }
+
+    public synchronized boolean isFullSyncCompleted(String owner) {
+        return "true".equals(getConfig(ownerKey(owner, "full_sync_completed"), "false"));
+    }
+
+    public synchronized String ownerLastSync(String owner) {
+        String v = getConfig(ownerKey(owner, "last_sync_human"), "");
+        return v != null ? v : "";
+    }
+
+    public synchronized String ownerFullSyncDate(String owner) {
+        String v = getConfig(ownerKey(owner, "full_sync_date"), "");
+        return v != null ? v : "";
     }
 }

@@ -56,19 +56,19 @@ public final class SyncEngine {
                 SyncService.SyncProgress.currentArchive = ym;
                 SyncService.SyncProgress.statusMessage = "Mês " + (i + 1) + "/" + archives.size() + " (" + ym + ")";
 
-                if (!isCurrentMonth && db.isArchiveSynced(archiveUrl)) continue;
+                if (!isCurrentMonth && db.isArchiveSynced(archiveUrl, username)) continue;
                 if (listener != null) listener.onProgress("Mês " + (i + 1) + "/" + archives.size() + " (" + ym + ")");
 
                 int inserted = fetchAndStoreMonth(db, username, archiveUrl);
                 totalInserted += inserted;
                 SyncService.SyncProgress.gamesInserted = totalInserted;
 
-                if (!isCurrentMonth) db.markArchiveSynced(archiveUrl, ym, inserted, true);
+                if (!isCurrentMonth) db.markArchiveSynced(archiveUrl, ym, inserted, true, username);
                 try { Thread.sleep(120); } catch (Exception ignored) {}
             }
-            db.putConfig("full_sync_completed", "true");
+            db.putConfig(fullKey(username, "full_sync_completed"), "true");
             java.text.SimpleDateFormat sdfFull = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
-            db.putConfig("full_sync_date", sdfFull.format(new java.util.Date()));
+            db.putConfig(fullKey(username, "full_sync_date"), sdfFull.format(new java.util.Date()));
         } else {
             long maxEnd = db.getMaxEndTime();
             int startIdx = Math.max(0, archives.size() - 2);
@@ -101,11 +101,15 @@ public final class SyncEngine {
         }
 
         java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
-        db.putConfig("last_sync_human", sdf.format(new java.util.Date()));
+        db.putConfig(fullKey(username, "last_sync_human"), sdf.format(new java.util.Date()));
         db.putConfig("last_alarm_run", String.valueOf(System.currentTimeMillis()));
 
         Log.i(TAG, "sync done mode=" + mode + " total=" + totalInserted);
         return totalInserted;
+    }
+
+    static String fullKey(String owner, String base) {
+        return DatabaseHelper.ownerKey(owner, base);
     }
 
     static String extractYearMonth(String archiveUrl) {

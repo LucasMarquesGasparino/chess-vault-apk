@@ -19,24 +19,54 @@
     this.position = null; // 8x8 array vindo do chess.js
     this.lastMove = null; // {from,to}
     this.errSquare = null;
+    this.selSquare = null; // casa selecionada no tap-to-move
+    this.legalTargets = null; // mapa to->san[] p/ highlight
     var self = this;
     this._touchX = null;
     this.cv.addEventListener('touchstart', function (e) {
       if (e.touches.length === 1) self._touchX = e.touches[0].clientX;
     }, { passive: true });
     this.cv.addEventListener('touchend', function (e) {
-      if (self._touchX === null || !window.__boardSwipe) return;
+      if (self._touchX === null) return;
       var dx = e.changedTouches[0].clientX - self._touchX;
       self._touchX = null;
       if (Math.abs(dx) < 30) return;
-      window.__boardSwipe(dx > 0 ? -1 : 1);
+      if (window.__boardSwipe) window.__boardSwipe(dx > 0 ? -1 : 1);
     }, { passive: true });
+    this.cv.addEventListener('click', function (e) {
+      if (window.__boardTap) {
+        var sq = self.squareAt(e);
+        if (sq) window.__boardTap(sq);
+      }
+    });
   }
+
+  Board.prototype.setSelected = function (sqName, legalTargets) {
+    this.selSquare = sqName || null;
+    this.legalTargets = legalTargets || null;
+    this.draw();
+  };
+
+  Board.prototype.squareAt = function (e) {
+    try {
+      var rect = this.cv.getBoundingClientRect();
+      var cssX = (e.clientX - rect.left), cssY = (e.clientY - rect.top);
+      var scaleX = this.cv.width / Math.max(1, rect.width);
+      var scaleY = this.cv.height / Math.max(1, rect.height);
+      var px = cssX * scaleX, py = cssY * scaleY;
+      var S = this.cv.width, sq = S / 8;
+      var c = Math.floor(px / sq), r = Math.floor(py / sq);
+      if (c < 0 || c > 7 || r < 0 || r > 7) return null;
+      return sqName(r, c, this.flipped);
+    } catch (err) { return null; }
+  };
 
   Board.prototype.setFromChess = function (chessObj, lastMove, errSquare) {
     this.position = chessObj.board();
     this.lastMove = lastMove || null;
     this.errSquare = errSquare || null;
+    this.selSquare = null;
+    this.legalTargets = null;
     this.draw();
   };
 
@@ -72,6 +102,10 @@
           ctx.fillStyle = 'rgba(224,92,92,0.60)';
           ctx.fillRect(c * sq, r * sq, sq, sq);
         }
+        if (this.selSquare && name === this.selSquare) {
+          ctx.fillStyle = 'rgba(129,182,76,0.55)';
+          ctx.fillRect(c * sq, r * sq, sq, sq);
+        }
         var piece = null;
         if (this.position) {
           var pr = this.flipped ? 7 - r : r;
@@ -97,6 +131,13 @@
             ctx.strokeText(glyph, x, y);
             ctx.fillText(glyph, x, y);
           }
+        }
+        if (this.legalTargets && this.legalTargets[name]) {
+          var cx = c * sq + sq / 2, cy = r * sq + sq / 2;
+          ctx.fillStyle = 'rgba(20,40,20,0.55)';
+          ctx.beginPath();
+          ctx.arc(cx, cy, sq * 0.16, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
     }

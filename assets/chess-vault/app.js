@@ -6,7 +6,7 @@
   var board = null, chess = null, histSans = [], plyIdx = 0, errPlyIdx = -1, flipState = false;
   var touchTimer = null;
   var activeFilter = null, activeFilterLabel = '';
-  var analyzeMode = false, analyzeChess = null, analyzeSans = [];
+  var analyzeMode = false, analyzeChess = null, analyzeSans = [], analyzeSel = null;
 
   function $(id) { return document.getElementById(id); }
   function toast(m) { try { A && A.showToast(m); } catch (e) {} }
@@ -367,17 +367,24 @@
     analyzeMode = true;
     analyzeChess = base;
     analyzeSans = [];
+    analyzeSel = null;
     $('analyzePanel').classList.remove('hidden');
+    $('analyzeHint').classList.remove('hidden');
     $('btnAnalyzeExit').classList.remove('hidden');
     $('btnAnalyze').classList.add('hidden');
+    window.__boardTap = onBoardTap;
     renderAnalyze();
   }
   function exitAnalyze() {
     analyzeMode = false;
     analyzeChess = null;
     analyzeSans = [];
+    analyzeSel = null;
+    window.__boardTap = null;
     var p = $('analyzePanel');
     if (p) p.classList.add('hidden');
+    var ah = $('analyzeHint');
+    if (ah) ah.classList.add('hidden');
     var e = $('btnAnalyzeExit');
     if (e) e.classList.add('hidden');
     var b = $('btnAnalyze');
@@ -416,6 +423,67 @@
       })(btns[j]);
     }
     $('mvInfo').textContent = 'análise • ' + analyzeSans.length + ' lances livres';
+    if (board && board.setSelected) {
+      var targets = analyzeSel ? legalTargetsFrom(analyzeSel) : null;
+      board.setSelected(analyzeSel, targets);
+    }
+  }
+  function legalMovesVerbose() {
+    try { return analyzeChess.moves({ verbose: true }) || []; } catch (e) {}
+    return [];
+  }
+  function legalTargetsFrom(sq) {
+    var map = {};
+    var all = legalMovesVerbose();
+    for (var i = 0; i < all.length; i++) {
+      if (all[i] && all[i].from === sq && all[i].to) map[all[i].to] = 1;
+    }
+    return map;
+  }
+  function pieceAt(sq) {
+    try {
+      var g = analyzeChess.get(sq);
+      return g || null;
+    } catch (e) {}
+    return null;
+  }
+  function turnColor() {
+    try { return analyzeChess.turn(); } catch (e) {}
+    return 'w';
+  }
+  function onBoardTap(sq) {
+    if (!analyzeMode || !analyzeChess) return;
+    if (analyzeSel && legalTargetsFrom(analyzeSel)[sq]) {
+      var cand = legalMovesVerbose();
+      var pick = null;
+      for (var i = 0; i < cand.length; i++) {
+        if (cand[i] && cand[i].from === analyzeSel && cand[i].to === sq) {
+          if (!pick || (cand[i].promotion && cand[i].promotion === 'q')) pick = cand[i];
+          else if (!pick) pick = cand[i];
+        }
+      }
+      if (pick) {
+        try {
+          var mv = analyzeChess.move({ from: pick.from, to: pick.to, promotion: pick.promotion || 'q' });
+          if (mv) {
+            analyzeSans.push(mv.san || (pick.from + pick.to));
+            analyzeSel = null;
+            renderAnalyze();
+            return;
+          }
+        } catch (e) {}
+        toast('Lance ilegal');
+        return;
+      }
+    }
+    var pc = pieceAt(sq);
+    if (pc && pc.color === turnColor()) {
+      analyzeSel = sq;
+      renderAnalyze();
+    } else if (analyzeSel) {
+      analyzeSel = null;
+      renderAnalyze();
+    }
   }
   function analyzePlay(san) {
     if (!analyzeChess) return;
@@ -423,6 +491,7 @@
       var mv = analyzeChess.move(san);
       if (!mv) { toast('Lance ilegal'); return; }
       analyzeSans.push(mv.san || san);
+      analyzeSel = null;
       renderAnalyze();
     } catch (e) { toast('Lance ilegal'); }
   }
@@ -433,6 +502,7 @@
         var u = analyzeChess.undo();
         if (u) analyzeSans.pop();
       } catch (e) {}
+      analyzeSel = null;
     }
     renderAnalyze();
   }

@@ -45,7 +45,7 @@ public class VaultBridge {
     public String getAllConfig() {
         try {
             JSONObject o = new JSONObject();
-            String[] keys = new String[]{"username", "secondary_username", "active_owner", "auto_sync_enabled", "last_sync_human", "next_alarm_human", "full_sync_completed", "full_sync_date"};
+            String[] keys = new String[]{"username", "secondary_username", "active_owner", "auto_sync_enabled", "last_alarm_run", "next_alarm_ms", "next_alarm_human"};
             for (String k : keys) {
                 String v = db.getConfig(k);
                 if (v != null) o.put(k, v);
@@ -53,9 +53,12 @@ public class VaultBridge {
             if (!o.has("username") || o.optString("username").trim().isEmpty()) {
                 o.put("username", "LuckGaspar");
             }
-            if (!o.has("active_owner") || o.optString("active_owner").trim().isEmpty()) {
-                o.put("active_owner", o.optString("username", "LuckGaspar"));
-            }
+            String active = db.activeOwner();
+            if (active.isEmpty()) active = o.optString("username", "LuckGaspar").trim().toLowerCase(java.util.Locale.US);
+            o.put("active_owner", active);
+            o.put("full_sync_completed", db.isFullSyncCompleted(active) ? "true" : "false");
+            o.put("full_sync_date", db.ownerFullSyncDate(active));
+            o.put("last_sync_human", db.ownerLastSync(active));
             o.put("total_games", db.countGames());
             o.put("total_all_games", db.countAllGames());
             return o.toString();
@@ -133,11 +136,12 @@ public class VaultBridge {
     public int saveGames(String jsonArrayStr) {
         try {
             JSONArray arr = new JSONArray(jsonArrayStr);
-            int n = db.insertGames(arr);
+            String owner = db.activeOwner();
+            int n = db.insertGames(arr, owner);
             if (n > 0) {
                 invalidateStats();
                 java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
-                db.putConfig("last_sync_human", sdf.format(new java.util.Date()));
+                db.putConfig(DatabaseHelper.ownerKey(owner, "last_sync_human"), sdf.format(new java.util.Date()));
             }
             return n;
         } catch (Exception e) {
@@ -228,7 +232,7 @@ public class VaultBridge {
 
     @JavascriptInterface
     public String getLastSyncHuman() {
-        String v = db.getConfig("last_sync_human");
+        String v = db.ownerLastSync(db.activeOwner());
         return v != null ? v : "";
     }
 

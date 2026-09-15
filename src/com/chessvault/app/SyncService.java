@@ -100,8 +100,8 @@ public class SyncService extends Service {
                 DatabaseHelper db = new DatabaseHelper(SyncService.this);
                 try {
                     if (effectiveMode == null || effectiveMode.isEmpty()) {
-                        String fullDone = db.getConfig("full_sync_completed", "false");
-                        effectiveMode = "true".equals(fullDone) ? "incremental" : "full";
+                        String ownerNow = db.activeOwner();
+                        effectiveMode = db.isFullSyncCompleted(ownerNow) ? "incremental" : "full";
                     }
                     SyncProgress.reset(effectiveMode);
                     inserted = SyncEngine.runSync(SyncService.this, db, effectiveMode, new SyncEngine.ProgressListener() {
