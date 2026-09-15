@@ -2,8 +2,6 @@ package com.chessvault.app;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Parser PGN puro-Java (sem dependência Android) para permitir teste unitário.
@@ -13,10 +11,66 @@ import java.util.regex.Pattern;
 public final class GameParser {
     private GameParser() {}
 
-    private static final Pattern MOVE_NUM = Pattern.compile("[0-9]+\\.{1,3}[ \\t\\n\\r]*");
-    private static final Pattern CLK = Pattern.compile("\\{\\[%clk ([0-9]+):([0-9]+):([0-9.]+)\\]}");
-    private static final Pattern SAN_TOKEN = Pattern.compile("[^ \\t\\n\\r{}]+");
-    private static final Pattern RESULT_TOK = Pattern.compile("^(1-0|0-1|1/2-1/2|\\*)$");
+    private static List<String> splitTokens(String s) {
+        List<String> toks = new ArrayList<String>();
+        int i = 0, n = s.length();
+        while (i < n) {
+            while (i < n && isSpace(s.charAt(i))) i++;
+            if (i >= n) break;
+            char c = s.charAt(i);
+            if (c == '{' || c == '}') { i++; continue; }
+            int j = i;
+            while (j < n && !isSpace(s.charAt(j)) && s.charAt(j) != '{' && s.charAt(j) != '}') j++;
+            toks.add(s.substring(i, j));
+            i = j;
+        }
+        return toks;
+    }
+
+    private static boolean isSpace(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+    }
+
+    private static boolean isResultTok(String tok) {
+        return "1-0".equals(tok) || "0-1".equals(tok) || "1/2-1/2".equals(tok) || "*".equals(tok);
+    }
+
+    private static boolean isMoveNumPrefix(String tok) {
+        int i = 0;
+        while (i < tok.length() && tok.charAt(i) >= '0' && tok.charAt(i) <= '9') i++;
+        if (i == 0 || i >= tok.length() || tok.charAt(i) != '.') return false;
+        return true;
+    }
+
+    private static String stripMoveNumPrefix(String tok) {
+        int i = 0;
+        while (i < tok.length() && tok.charAt(i) >= '0' && tok.charAt(i) <= '9') i++;
+        while (i < tok.length() && tok.charAt(i) == '.') i++;
+        return tok.substring(i);
+    }
+
+    private static void extractClocks(String body, List<Double> out) {
+        String tag = "[%clk ";
+        int i = 0;
+        while (true) {
+            int k = body.indexOf(tag, i);
+            if (k < 0) break;
+            int e = body.indexOf(']', k + tag.length());
+            if (e < 0) break;
+            String clk = body.substring(k + tag.length(), e).trim();
+            try {
+                int c1 = clk.indexOf(':');
+                int c2 = c1 >= 0 ? clk.indexOf(':', c1 + 1) : -1;
+                if (c1 > 0 && c2 > c1) {
+                    double s = Integer.parseInt(clk.substring(0, c1).trim()) * 3600.0
+                            + Integer.parseInt(clk.substring(c1 + 1, c2).trim()) * 60.0
+                            + Double.parseDouble(clk.substring(c2 + 1).trim());
+                    out.add(s);
+                }
+            } catch (Exception ignored) {}
+            i = e + 1;
+        }
+    }
 
     public static final class Parsed {
         public final List<String> movesSan = new ArrayList<String>();
@@ -31,24 +85,20 @@ public final class GameParser {
         String cleanPgn = pgn.replace("\r\n", "\n").replace('\r', '\n');
         int bodyStart = cleanPgn.indexOf("\n\n");
         String body = bodyStart >= 0 ? cleanPgn.substring(bodyStart + 2) : stripHeaders(cleanPgn);
-        Matcher clkM = CLK.matcher(body);
-        while (clkM.find()) {
-            try {
-                double s = Integer.parseInt(clkM.group(1)) * 3600.0
-                        + Integer.parseInt(clkM.group(2)) * 60.0
-                        + Double.parseDouble(clkM.group(3));
-                p.clocksSec.add(s);
-            } catch (Exception ignored) {}
-        }
+        extractClocks(body, p.clocksSec);
         String noComments = removeComments(body);
         noComments = removeNags(noComments);
-        noComments = MOVE_NUM.matcher(noComments).replaceAll(" ");
-        Matcher m = SAN_TOKEN.matcher(noComments);
-        while (m.find()) {
-            String tok = m.group().trim();
+        for (String tok : splitTokens(noComments)) {
             if (tok.isEmpty()) continue;
-            if (RESULT_TOK.matcher(tok).matches()) break;
-            if (tok.equals("...")) continue;
+            if (isResultTok(tok)) break;
+            if ("...".equals(tok)) continue;
+            if (isMoveNumPrefix(tok)) {
+                String rest = stripMoveNumPrefix(tok);
+                if (!rest.isEmpty() && !isResultTok(rest) && !"w...".equals(rest) && !"b...".equals(rest)) {
+                    if (!"...".equals(rest)) p.movesSan.add(rest);
+                }
+                continue;
+            }
             p.movesSan.add(tok);
         }
         p.moveCount = (p.movesSan.size() + 1) / 2;
