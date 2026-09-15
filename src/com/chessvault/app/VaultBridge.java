@@ -124,16 +124,54 @@ public class VaultBridge {
 
     @JavascriptInterface
     public void triggerFullSync() {
-        activity.runOnUiThread(new Runnable() {
-            @Override public void run() { activity.startSyncService("full"); }
-        });
+        startSyncThread("full");
     }
 
     @JavascriptInterface
     public void triggerIncrementalSync() {
-        activity.runOnUiThread(new Runnable() {
-            @Override public void run() { activity.startSyncService("incremental"); }
-        });
+        startSyncThread("incremental");
+    }
+
+    private void startSyncThread(final String mode) {
+        if (SyncService.SyncProgress.isSyncing) {
+            showToast("Sync já em andamento...");
+            return;
+        }
+        SyncService.SyncProgress.reset(mode);
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int inserted = 0;
+                try {
+                    inserted = SyncEngine.runSync(ctx, db, mode, null);
+                    SyncService.SyncProgress.finish(inserted);
+                } catch (Exception e) {
+                    android.util.Log.e("ChessVaultSync", "sync error", e);
+                    SyncService.SyncProgress.error(e.getMessage());
+                }
+            }
+        }).start();
+    }
+
+    @JavascriptInterface
+    public String getCrashLog() {
+        try {
+            java.io.File f = new java.io.File(ctx.getExternalFilesDir(null), "chess_crash.log");
+            if (f == null || !f.exists()) return "(sem crash registrado)";
+            StringBuilder sb = new StringBuilder();
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f));
+            String line;
+            int count = 0;
+            String last = "";
+            java.util.ArrayList<String> lines = new java.util.ArrayList<String>();
+            while ((line = br.readLine()) != null) lines.add(line);
+            br.close();
+            int start = Math.max(0, lines.size() - 40);
+            for (int i = start; i < lines.size(); i++) sb.append(lines.get(i)).append("\n");
+            String out = sb.toString();
+            return out.length() > 4000 ? out.substring(out.length() - 4000) : out;
+        } catch (Exception e) {
+            return "erro ao ler log: " + e.getMessage();
+        }
     }
 
     @JavascriptInterface

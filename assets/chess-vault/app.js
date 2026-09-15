@@ -266,6 +266,13 @@
     $('btnWipe').addEventListener('click', function () {
       if (confirm('Apagar todas as partidas do cofre?')) { A.clearAll(); toast('Cofre apagado'); refresh(); }
     });
+    $('btnCrashLog').addEventListener('click', function () {
+      var t = '';
+      try { t = A.getCrashLog(); } catch (e) { t = 'erro: ' + e; }
+      var el = $('crashLog');
+      el.textContent = t || '(vazio)';
+      el.classList.remove('hidden');
+    });
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden) { loadCfg(); loadStats(); checkActiveSync(); }
     });

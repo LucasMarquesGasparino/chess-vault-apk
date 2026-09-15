@@ -10,15 +10,7 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
-import org.json.JSONArray;
 import org.json.JSONObject;
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
 
 public class SyncService extends Service {
     private static final String TAG = "ChessVaultSync";
@@ -112,7 +104,11 @@ public class SyncService extends Service {
                         effectiveMode = "true".equals(fullDone) ? "incremental" : "full";
                     }
                     SyncProgress.reset(effectiveMode);
-                    inserted = doSync(db, effectiveMode);
+                    inserted = SyncEngine.runSync(SyncService.this, db, effectiveMode, new SyncEngine.ProgressListener() {
+                        @Override public void onProgress(String text) {
+                            updateOngoingNotification(text);
+                        }
+                    });
                     SyncProgress.finish(inserted);
                 } catch (Exception e) {
                     Log.e(TAG, "sync error", e);
@@ -223,171 +219,5 @@ public class SyncService extends Service {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) nm.notify(NOTIF_ID_ONGOING, buildOngoingNotification(text));
         } catch (Exception ignored) {}
-    }
-
-    private int doSync(DatabaseHelper db, String mode) throws Exception {
-        String username = db.getConfig("username", "LuckGaspar").trim().toLowerCase();
-        if (username.isEmpty()) {
-            Log.w(TAG, "no username configured");
-            return 0;
-        }
-
-        List<String> archives = fetchArchives(username);
-        if (archives.isEmpty()) {
-            SyncProgress.statusMessage = "Nenhum arquivo encontrado para o usuário";
-            return 0;
-        }
-
-        SyncProgress.totalMonths = archives.size();
-        int totalInserted = 0;
-        boolean isFullMode = "full".equalsIgnoreCase(mode);
-
-        java.util.Calendar nowCal = java.util.Calendar.getInstance();
-        int curYear = nowCal.get(java.util.Calendar.YEAR);
-        int curMonth = nowCal.get(java.util.Calendar.MONTH) + 1;
-        String curYm = String.format(java.util.Locale.US, "%04d/%02d", curYear, curMonth);
-
-        if (isFullMode) {
-            for (int i = 0; i < archives.size(); i++) {
-                String archiveUrl = archives.get(i);
-                String ym = extractYearMonth(archiveUrl);
-                boolean isCurrentMonth = archiveUrl.endsWith(curYm) || (i == archives.size() - 1);
-
-                SyncProgress.currentMonth = i + 1;
-                SyncProgress.currentArchive = ym;
-                SyncProgress.statusMessage = "Mês " + (i + 1) + "/" + archives.size() + " (" + ym + ")";
-
-                // Se já foi sincronizado e não é o mês corrente em aberto, pula download
-                if (!isCurrentMonth && db.isArchiveSynced(archiveUrl)) {
-                    continue;
-                }
-
-                updateOngoingNotification("Mês " + (i + 1) + "/" + archives.size() + " (" + totalInserted + " partidas)");
-
-                int inserted = fetchAndStoreMonth(db, username, archiveUrl);
-                totalInserted += inserted;
-                SyncProgress.gamesInserted = totalInserted;
-
-                if (!isCurrentMonth) {
-                    db.markArchiveSynced(archiveUrl, ym, inserted, true);
-                }
-
-                try { Thread.sleep(120); } catch (Exception ignored) {}
-            }
-            db.putConfig("full_sync_completed", "true");
-            java.text.SimpleDateFormat sdfFull = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
-            db.putConfig("full_sync_date", sdfFull.format(new java.util.Date()));
-        } else {
-            // Modo incremental: processa apenas os últimos 2 arquivos (mês atual e anterior)
-            int startIdx = Math.max(0, archives.size() - 2);
-            SyncProgress.totalMonths = archives.size() - startIdx;
-            int step = 0;
-            for (int i = startIdx; i < archives.size(); i++) {
-                step++;
-                String archiveUrl = archives.get(i);
-                String ym = extractYearMonth(archiveUrl);
-
-                SyncProgress.currentMonth = step;
-                SyncProgress.currentArchive = ym;
-                SyncProgress.statusMessage = "Mês " + ym;
-
-                updateOngoingNotification("Sync recente (" + ym + ")...");
-                int inserted = fetchAndStoreMonth(db, username, archiveUrl);
-                totalInserted += inserted;
-                SyncProgress.gamesInserted = totalInserted;
-
-                try { Thread.sleep(120); } catch (Exception ignored) {}
-            }
-        }
-
-        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault());
-        db.putConfig("last_sync_human", sdf.format(new java.util.Date()));
-        db.putConfig("last_alarm_run", String.valueOf(System.currentTimeMillis()));
-
-        Log.i(TAG, "sync done mode=" + mode + " total=" + totalInserted);
-        return totalInserted;
-    }
-
-    private String extractYearMonth(String archiveUrl) {
-        try {
-            String[] parts = archiveUrl.split("/");
-            if (parts.length >= 2) {
-                return parts[parts.length - 2] + "-" + parts[parts.length - 1];
-            }
-        } catch (Exception ignored) {}
-        return archiveUrl;
-    }
-
-    private List<String> fetchArchives(String username) throws Exception {
-        String body = httpGet("https://api.chess.com/pub/player/" + username + "/games/archives");
-        JSONObject o = new JSONObject(body);
-        JSONArray arr = o.optJSONArray("archives");
-        List<String> out = new ArrayList<String>();
-        if (arr != null) {
-            for (int i = 0; i < arr.length(); i++) {
-                out.add(arr.getString(i));
-            }
-        }
-        return out;
-    }
-
-    private int fetchAndStoreMonth(DatabaseHelper db, String username, String archiveUrl) {
-        try {
-            String body = httpGetWithRetry(archiveUrl);
-            JSONObject o = new JSONObject(body);
-            JSONArray games = o.optJSONArray("games");
-            if (games == null || games.length() == 0) return 0;
-            JSONArray toInsert = new JSONArray();
-            for (int i = 0; i < games.length(); i++) {
-                JSONObject g = games.getJSONObject(i);
-                long endTime = g.optLong("end_time", 0);
-                if (endTime <= 0) continue;
-                JSONObject flat = GameParser.flattenGame(username, g);
-                if (flat != null) toInsert.put(flat);
-            }
-            if (toInsert.length() == 0) return 0;
-            return db.insertGames(toInsert);
-        } catch (Exception e) {
-            Log.w(TAG, "month failed " + archiveUrl + ": " + e.getMessage());
-            return 0;
-        }
-    }
-
-    private String httpGetWithRetry(String urlStr) throws Exception {
-        try {
-            return httpGet(urlStr);
-        } catch (Exception e) {
-            if (e.getMessage() != null && e.getMessage().contains("429")) {
-                Log.w(TAG, "HTTP 429 rate limit, sleeping 2500ms before retry...");
-                try { Thread.sleep(2500); } catch (Exception ignored) {}
-                return httpGet(urlStr);
-            }
-            throw e;
-        }
-    }
-
-    private String httpGet(String urlStr) throws Exception {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("User-Agent", UA);
-        conn.setRequestProperty("Accept-Encoding", "gzip");
-        conn.setConnectTimeout(20000);
-        conn.setReadTimeout(30000);
-        int code = conn.getResponseCode();
-        if (code == 404) throw new Exception("HTTP 404 (usuário inexistente?)");
-        if (code == 429) throw new Exception("HTTP 429 rate limit — tente de novo em instantes");
-        if (code != 200) throw new Exception("HTTP " + code);
-        InputStream is = conn.getInputStream();
-        String enc = conn.getContentEncoding();
-        if (enc != null && enc.toLowerCase().contains("gzip")) {
-            is = new java.util.zip.GZIPInputStream(is);
-        }
-        BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) sb.append(line);
-        br.close();
-        return sb.toString();
     }
 }
