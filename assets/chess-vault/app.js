@@ -21,7 +21,7 @@
         var secs = document.querySelectorAll('main .tab');
         for (var k = 0; k < secs.length; k++) secs[k].classList.remove('active');
         $('tab-' + t).classList.add('active');
-        if (t === 'games' && pgOffset === 0) loadGames(true);
+        if (t === 'games') loadGames(false);
       });
     }
   }
@@ -38,6 +38,8 @@
       } else {
         $('cfgUser').value = 'LuckGaspar';
       }
+      $('cfgUser2').value = cfg.secondary_username || '';
+      renderOwnerTabs(cfg);
       var isFullDone = cfg.full_sync_completed === 'true';
       if (isFullDone) {
         $('btnFullSync').classList.add('hidden');
@@ -52,8 +54,35 @@
         ' • último sync: ' + (cfg.last_sync_human || 'nunca') +
         ' • próximo: ' + (cfg.next_alarm_human || '—') +
         ' • auto: ' + (auto ? 'ON' : 'OFF');
-      $('hdrSub').textContent = (cfg.username || 'LuckGaspar') + ' • ' + (cfg.total_games || 0) + ' partidas';
+      $('hdrSub').textContent = (cfg.active_owner || cfg.username || 'LuckGaspar') + ' • ' + (cfg.total_games || 0) + ' partidas';
     } catch (e) {}
+  }
+
+  function renderOwnerTabs(cfg) {
+    var box = $('ownerTabs');
+    if (!box) return;
+    var u1 = (cfg.username || 'LuckGaspar').trim();
+    var u2 = (cfg.secondary_username || '').trim();
+    var active = (cfg.active_owner || u1).trim().toLowerCase();
+    var h = '';
+    h += '<button class="sec owner-tab' + (active === u1.toLowerCase() ? ' active' : '') + '" data-owner="' + esc(u1) + '">' + esc(u1) + '</button>';
+    if (u2) {
+      h += '<button class="sec owner-tab' + (active === u2.toLowerCase() ? ' active' : '') + '" data-owner="' + esc(u2) + '">' + esc(u2) + '</button>';
+    } else {
+      h += '<span class="hint">adicione o 2º username abaixo p/ alternar</span>';
+    }
+    box.innerHTML = h;
+    var tabs = box.querySelectorAll('.owner-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      (function (el) {
+        el.addEventListener('click', function () {
+          var o = '';
+          try { o = A.switchOwner(el.getAttribute('data-owner')); } catch (e) {}
+          clearFilter();
+          refresh();
+        });
+      })(tabs[i]);
+    }
   }
 
   function loadStats() {
@@ -165,8 +194,11 @@
     return '<span class="pill draw">empate</span>';
   }
 
-  function loadGames(reset) {
-    if (reset) { pgOffset = 0; $('gameDetail').classList.add('hidden'); }
+  function loadGames(reset, keepDetail) {
+    if (reset) {
+      pgOffset = 0;
+      if (!keepDetail) closeGameDetail();
+    }
     var arr = [];
     var filterStr = activeFilter ? JSON.stringify(activeFilter) : null;
     try {
@@ -195,10 +227,26 @@
     $('pgInfo').textContent = (pgOffset + 1) + '–' + (pgOffset + arr.length);
     var cf = $('clearFilter');
     if (cf) cf.addEventListener('click', function (ev) { ev.preventDefault(); clearFilter(); });
-    var items = document.querySelectorAll('.gitem');
+    var items = document.querySelectorAll('#gameList .gitem');
     for (var i = 0; i < items.length; i++) {
       items[i].addEventListener('click', function () { openGame(this.getAttribute('data-uuid')); });
     }
+    bindGameDetailButtons();
+  }
+
+  var detailBound = false;
+  function bindGameDetailButtons() {
+    if (detailBound) return;
+    detailBound = true;
+  }
+  function closeGameDetail() {
+    exitAnalyze();
+    var gd = $('gameDetail');
+    if (gd) gd.classList.add('hidden');
+    var gl = $('gameList');
+    if (gl) gl.style.display = '';
+    var p = document.querySelector('#tab-games .pager');
+    if (p) p.style.display = '';
   }
 
   function chessNew() {
@@ -235,6 +283,7 @@
   function openGame(uuid) {
     var g = {};
     try { g = JSON.parse(A.getGame(uuid)); } catch (e) { toast('Falha ao abrir partida'); return; }
+    if (!g || !g.uuid) { toast('Partida não encontrada neste perfil'); return; }
     $('gameList').style.display = 'none';
     document.querySelector('.pager').style.display = 'none';
     $('gameDetail').classList.remove('hidden');
@@ -247,7 +296,8 @@
       (g.accuracy != null && g.accuracy !== 'null' ? ' • sua accuracy ' + g.accuracy : '') +
       '<br><a href="#" id="openChessCom" style="color:var(--accent)">Abrir no chess.com ↗</a>';
     $('gdMeta').innerHTML = meta;
-    $('openChessCom').addEventListener('click', function (ev) {
+    var oc = $('openChessCom');
+    if (oc) oc.addEventListener('click', function (ev) {
       ev.preventDefault();
       try { A.openExternal(g.url); } catch (e) {}
     });
@@ -258,10 +308,11 @@
       histSans = ok ? chess.history() : movesFromGame(g);
     } catch (e) { histSans = []; try { chess = chessNew(); } catch (e2) {} }
     if (!histSans.length) histSans = movesFromGame(g);
+    if (!histSans.length) { toast('PGN vazio — não dá p/ montar o tabuleiro'); }
     plyIdx = 0; flipState = (g.my_color === 'black');
     errPlyIdx = (g.err_move_num != null && g.err_move_num !== 'null')
       ? Math.max(0, (parseInt(g.err_move_num, 10) - 1) * 2 + (g.my_color === 'white' ? 0 : 1)) : -1;
-    if (!board) board = new ChessBoard('board');
+    if (!board) { try { board = new ChessBoard('board'); } catch (e) { toast('Tabuleiro não iniciou'); return; } }
     board.flipped = flipState;
     exitAnalyze();
     renderPly(g);
@@ -389,13 +440,9 @@
   function wireBoard(g) { return g; }
 
   function wire() {
-    $('prevPg').addEventListener('click', function () { pgOffset = Math.max(0, pgOffset - PAGE); loadGames(false); window.scrollTo(0, 0); });
-    $('nextPg').addEventListener('click', function () { pgOffset += PAGE; loadGames(false); window.scrollTo(0, 0); });
-    $('backList').addEventListener('click', function () {
-      $('gameDetail').classList.add('hidden');
-      $('gameList').style.display = '';
-      document.querySelector('.pager').style.display = '';
-    });
+    $('prevPg').addEventListener('click', function () { pgOffset = Math.max(0, pgOffset - PAGE); loadGames(false, true); window.scrollTo(0, 0); });
+    $('nextPg').addEventListener('click', function () { pgOffset += PAGE; loadGames(false, true); window.scrollTo(0, 0); });
+    $('backList').addEventListener('click', function () { closeGameDetail(); });
     $('mvFirst').addEventListener('click', function () { if (analyzeMode) return; plyIdx = 0; renderPly({}); });
     $('mvPrev').addEventListener('click', function () { if (analyzeMode) { analyzeRedo(-1); return; } plyIdx = Math.max(0, plyIdx - 1); renderPly({}); });
     $('mvNext').addEventListener('click', function () { plyIdx = Math.min(histSans.length, plyIdx + 1); renderPly({}); });
@@ -409,8 +456,12 @@
       var u = ($('cfgUser').value || '').trim();
       if (!u) { toast('Digite o username'); return; }
       A.saveConfig('username', u);
-      toast('Salvo: ' + u);
-      loadCfg();
+      var u2 = ($('cfgUser2').value || '').trim();
+      A.saveConfig('secondary_username', u2);
+      try { A.switchOwner(u); } catch (e) {}
+      toast('Salvo: ' + u + (u2 ? ' + ' + u2 : ''));
+      clearFilter();
+      refresh();
     });
     $('btnFullSync').addEventListener('click', function () {
       A.triggerFullSync();

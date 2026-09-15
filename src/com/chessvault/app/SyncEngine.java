@@ -29,7 +29,7 @@ public final class SyncEngine {
     }
 
     public static int runSync(Context ctx, DatabaseHelper db, String mode, ProgressListener listener) throws Exception {
-        String username = db.getConfig("username", "LuckGaspar");
+        String username = db.activeOwner();
         if (username == null) username = "";
         username = username.trim().toLowerCase();
         if (username.isEmpty()) throw new Exception("Configure o username primeiro");
@@ -147,7 +147,7 @@ public final class SyncEngine {
                 if (flat != null) toInsert.put(flat);
             }
             if (toInsert.length() == 0) return 0;
-            return db.insertGames(toInsert);
+            return db.insertGames(toInsert, username);
         } catch (Exception e) {
             Log.w(TAG, "month failed " + archiveUrl + ": " + e.getMessage());
             return 0;

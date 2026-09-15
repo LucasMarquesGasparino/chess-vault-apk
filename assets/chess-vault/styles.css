@@ -58,3 +58,4 @@ footer { position:fixed; bottom:0; left:0; right:0; background:#0d0c0b; border-t
 .sync-status { font-weight:700; font-size:13px; color:#7ee787; }
 .green { color:#7ee787 !important; }
 button.sec { background:#22201d; color:var(--txt); border:1px solid var(--line); }
+button.owner-tab.active { background:var(--green); border-color:var(--green); color:#fff; font-weight:700; }

@@ -10,7 +10,7 @@ import org.json.JSONObject;
 
 public class DatabaseHelper extends SQLiteOpenHelper {
     private static final String DB_NAME = "chess_vault.db";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
 
     public DatabaseHelper(Context ctx) {
         super(ctx, DB_NAME, null, DB_VERSION);
@@ -25,6 +25,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 "url TEXT," +
                 "end_time INTEGER," +
                 "end_date TEXT," +
+                "owner TEXT DEFAULT ''," +
                 "time_class TEXT," +
                 "time_control TEXT," +
                 "rated INTEGER," +
@@ -57,6 +58,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_eco ON games(eco_name)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_result ON games(my_result)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_errphase ON games(err_phase)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_owner ON games(owner)");
 
         db.execSQL("CREATE TABLE IF NOT EXISTS synced_archives (" +
                 "url TEXT PRIMARY KEY," +
@@ -77,6 +79,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                     "is_complete INTEGER," +
                     "synced_at INTEGER)");
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_synced_ym ON synced_archives(year_month)");
+        }
+        if (oldVersion < 3) {
+            try { db.execSQL("ALTER TABLE games ADD COLUMN owner TEXT DEFAULT ''"); } catch (Exception ignored) {}
+            try { db.execSQL("CREATE INDEX IF NOT EXISTS idx_games_owner ON games(owner)"); } catch (Exception ignored) {}
         }
     }
 
@@ -105,6 +111,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized int insertGames(JSONArray arr) {
+        return insertGames(arr, null);
+    }
+
+    public synchronized int insertGames(JSONArray arr, String owner) {
         if (arr == null || arr.length() == 0) return 0;
         SQLiteDatabase db = getWritableDatabase();
         int inserted = 0;
@@ -117,6 +127,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 cv.put("url", g.optString("url", ""));
                 cv.put("end_time", g.optLong("end_time", 0));
                 cv.put("end_date", g.optString("end_date", ""));
+                if (owner != null && !owner.isEmpty()) cv.put("owner", owner);
+                else if (g.has("owner") && !g.isNull("owner")) cv.put("owner", g.optString("owner", ""));
                 cv.put("time_class", g.optString("time_class", ""));
                 cv.put("time_control", g.optString("time_control", ""));
                 cv.put("rated", g.optInt("rated", 1));
@@ -153,6 +165,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized int countGames() {
+        return countGamesForOwner(activeOwner());
+    }
+
+    public synchronized int countAllGames() {
         SQLiteDatabase db = getReadableDatabase();
         Cursor c = db.rawQuery("SELECT COUNT(*) FROM games", null);
         try {
@@ -161,9 +177,29 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         } finally { c.close(); }
     }
 
-    public synchronized long getMaxEndTime() {
+    public synchronized int countGamesForOwner(String owner) {
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT MAX(end_time) FROM games", null);
+        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        Cursor c = db.rawQuery("SELECT COUNT(*) FROM games WHERE owner=?", new String[]{ow});
+        try {
+            if (c.moveToFirst()) return c.getInt(0);
+            return 0;
+        } finally { c.close(); }
+    }
+
+    public synchronized long getMaxEndTime() {
+        return getMaxEndTimeForOwner(activeOwner());
+    }
+
+    public synchronized long getMaxEndTimeForOwner(String owner) {
+        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c;
+        if (!ow.isEmpty()) {
+            c = db.rawQuery("SELECT MAX(end_time) FROM games WHERE owner=?", new String[]{ow});
+        } else {
+            c = db.rawQuery("SELECT MAX(end_time) FROM games", null);
+        }
         try {
             if (c.moveToFirst() && !c.isNull(0)) return c.getLong(0);
             return 0;
@@ -171,13 +207,28 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized JSONObject getStats() {
+        return getStatsForOwner(activeOwner());
+    }
+
+    public synchronized String activeOwner() {
+        String o = getConfig("active_owner", "");
+        if (o == null || o.trim().isEmpty()) {
+            o = getConfig("username", "LuckGaspar");
+        }
+        return o != null ? o.trim().toLowerCase() : "";
+    }
+
+    public synchronized JSONObject getStatsForOwner(String owner) {
         JSONObject o = new JSONObject();
         SQLiteDatabase db = getReadableDatabase();
+        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        String owWhere = " WHERE owner=? ";
+        String[] owArg = new String[]{ow};
         try {
-            o.put("total", countGames());
+            o.put("total", countGamesForOwner(ow));
             Cursor c = db.rawQuery(
                 "SELECT time_class, COUNT(*), SUM(is_win), SUM(is_loss), SUM(is_draw), " +
-                "AVG(my_rating), AVG(accuracy) FROM games GROUP BY time_class", null);
+                "AVG(my_rating), AVG(accuracy) FROM games" + owWhere + "GROUP BY time_class", owArg);
             JSONArray byTc = new JSONArray();
             try {
                 while (c.moveToNext()) {
@@ -195,7 +246,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             o.put("by_time_class", byTc);
 
             Cursor c2 = db.rawQuery(
-                "SELECT my_color, COUNT(*), SUM(is_win), SUM(is_loss), SUM(is_draw) FROM games GROUP BY my_color", null);
+                "SELECT my_color, COUNT(*), SUM(is_win), SUM(is_loss), SUM(is_draw) FROM games" + owWhere + "GROUP BY my_color", owArg);
             JSONArray byColor = new JSONArray();
             try {
                 while (c2.moveToNext()) {
@@ -212,7 +263,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
 
             Cursor c3 = db.rawQuery(
                 "SELECT eco_name, COUNT(*), SUM(is_win), SUM(is_loss), SUM(is_draw) FROM games " +
-                "WHERE eco_name<>'' GROUP BY eco_name ORDER BY COUNT(*) DESC LIMIT 15", null);
+                owWhere + "AND eco_name<>'' GROUP BY eco_name ORDER BY COUNT(*) DESC LIMIT 15", owArg);
             JSONArray openings = new JSONArray();
             try {
                 while (c3.moveToNext()) {
@@ -228,7 +279,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             o.put("openings", openings);
 
             Cursor c4 = db.rawQuery(
-                "SELECT err_phase, COUNT(*) FROM games WHERE err_phase<>'' AND err_phase IS NOT NULL GROUP BY err_phase", null);
+                "SELECT err_phase, COUNT(*) FROM games" + owWhere + "AND err_phase<>'' AND err_phase IS NOT NULL GROUP BY err_phase", owArg);
             JSONObject errPhase = new JSONObject();
             try {
                 while (c4.moveToNext()) errPhase.put(c4.getString(0), c4.getInt(1));
@@ -236,8 +287,8 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             o.put("err_by_phase", errPhase);
 
             Cursor c5 = db.rawQuery(
-                "SELECT err_move_num, COUNT(*) FROM games WHERE err_move_num IS NOT NULL " +
-                "GROUP BY err_move_num ORDER BY err_move_num", null);
+                "SELECT err_move_num, COUNT(*) FROM games" + owWhere + "AND err_move_num IS NOT NULL " +
+                "GROUP BY err_move_num ORDER BY err_move_num", owArg);
             JSONArray errHist = new JSONArray();
             try {
                 while (c5.moveToNext()) {
@@ -252,7 +303,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             Cursor c6 = db.rawQuery(
                 "SELECT SUM(is_timeout_loss), SUM(is_mate_loss), " +
                 "SUM(CASE WHEN my_result='resigned' THEN 1 ELSE 0 END), " +
-                "AVG(accuracy) FROM games", null);
+                "AVG(accuracy) FROM games" + owWhere.substring(0, owWhere.length() - 1), owArg);
             try {
                 if (c6.moveToFirst()) {
                     o.put("timeout_losses", c6.isNull(0) ? 0 : c6.getInt(0));
@@ -271,7 +322,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized int countFilteredGames(String filterJson) {
-        Filter f = Filter.parse(filterJson);
+        Filter f = Filter.parse(filterJson, activeOwner());
         SQLiteDatabase db = getReadableDatabase();
         String[] a = f.args.toArray(new String[f.args.size()]);
         Cursor c = db.rawQuery("SELECT COUNT(*) FROM games" + f.where, a);
@@ -282,7 +333,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized JSONArray queryGames(String filterJson, int limit, int offset) {
-        Filter f = Filter.parse(filterJson);
+        Filter f = Filter.parse(filterJson, activeOwner());
         JSONArray arr = new JSONArray();
         SQLiteDatabase db = getReadableDatabase();
         int lim = Math.max(1, Math.min(limit <= 0 ? 20 : limit, 100));
@@ -329,12 +380,20 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         String where = "";
         java.util.ArrayList<String> args = new java.util.ArrayList<String>();
 
-        static Filter parse(String filterJson) {
+        static Filter parse(String filterJson, String owner) {
             Filter f = new Filter();
-            if (filterJson == null || filterJson.trim().isEmpty() || "{}".equals(filterJson.trim())) return f;
+            java.util.ArrayList<String> conds = new java.util.ArrayList<String>();
+            String ow = owner != null ? owner.trim().toLowerCase() : "";
+            if (!ow.isEmpty()) {
+                conds.add("owner=?");
+                f.args.add(ow);
+            }
+            if (filterJson == null || filterJson.trim().isEmpty() || "{}".equals(filterJson.trim())) {
+                if (!conds.isEmpty()) f.where = " WHERE owner=? ";
+                return f;
+            }
             try {
                 JSONObject o = new JSONObject(filterJson);
-                java.util.ArrayList<String> conds = new java.util.ArrayList<String>();
                 addEq(o, conds, f.args, "time_class", "time_class");
                 addEq(o, conds, f.args, "color", "my_color");
                 addEq(o, conds, f.args, "eco", "eco_name");
@@ -381,8 +440,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized JSONObject getGame(String uuid) {
+        return getGameForOwner(uuid, activeOwner());
+    }
+
+    public synchronized JSONObject getGameForOwner(String uuid, String owner) {
+        String ow = owner != null ? owner.trim().toLowerCase() : "";
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT * FROM games WHERE uuid=? LIMIT 1", new String[]{uuid});
+        Cursor c;
+        if (!ow.isEmpty()) {
+            c = db.rawQuery("SELECT * FROM games WHERE uuid=? AND owner=? LIMIT 1", new String[]{uuid, ow});
+        } else {
+            c = db.rawQuery("SELECT * FROM games WHERE uuid=? LIMIT 1", new String[]{uuid});
+        }
         try {
             if (c.moveToFirst()) {
                 JSONObject g = new JSONObject();
@@ -430,6 +499,24 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     }
 
     public synchronized void clearAll() {
+        clearOwner(activeOwner());
+    }
+
+    public synchronized void clearOwner(String owner) {
+        String ow = owner != null ? owner.trim().toLowerCase() : "";
+        SQLiteDatabase db = getWritableDatabase();
+        try {
+            if (!ow.isEmpty()) {
+                db.execSQL("DELETE FROM games WHERE owner=?", new String[]{ow});
+            } else {
+                db.execSQL("DELETE FROM games");
+            }
+            db.execSQL("DELETE FROM synced_archives");
+            db.execSQL("DELETE FROM config WHERE key IN ('last_sync_human','full_sync_completed','full_sync_date')");
+        } catch (Exception ignored) {}
+    }
+
+    public synchronized void clearEverything() {
         SQLiteDatabase db = getWritableDatabase();
         try {
             db.execSQL("DELETE FROM games");

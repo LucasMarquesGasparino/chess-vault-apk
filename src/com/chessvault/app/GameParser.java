@@ -236,6 +236,7 @@ public final class GameParser {
             org.json.JSONObject flat = new org.json.JSONObject();
             flat.put("uuid", g.optString("uuid", ""));
             flat.put("url", g.optString("url", ""));
+            flat.put("owner", username != null ? username.toLowerCase() : "");
             long endTime = g.optLong("end_time", 0);
             flat.put("end_time", endTime);
             flat.put("end_date", dateStr(endTime));

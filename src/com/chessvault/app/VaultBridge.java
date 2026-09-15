@@ -45,7 +45,7 @@ public class VaultBridge {
     public String getAllConfig() {
         try {
             JSONObject o = new JSONObject();
-            String[] keys = new String[]{"username", "auto_sync_enabled", "last_sync_human", "next_alarm_human", "full_sync_completed", "full_sync_date"};
+            String[] keys = new String[]{"username", "secondary_username", "active_owner", "auto_sync_enabled", "last_sync_human", "next_alarm_human", "full_sync_completed", "full_sync_date"};
             for (String k : keys) {
                 String v = db.getConfig(k);
                 if (v != null) o.put(k, v);
@@ -53,26 +53,50 @@ public class VaultBridge {
             if (!o.has("username") || o.optString("username").trim().isEmpty()) {
                 o.put("username", "LuckGaspar");
             }
+            if (!o.has("active_owner") || o.optString("active_owner").trim().isEmpty()) {
+                o.put("active_owner", o.optString("username", "LuckGaspar"));
+            }
             o.put("total_games", db.countGames());
+            o.put("total_all_games", db.countAllGames());
             return o.toString();
         } catch (Exception e) { return "{}"; }
     }
 
     private String statsCache = null;
     private long statsAt = 0;
+    private String statsOwner = null;
 
-    private synchronized void invalidateStats() { statsCache = null; statsAt = 0; }
+    private synchronized void invalidateStats() { statsCache = null; statsAt = 0; statsOwner = null; }
 
     @JavascriptInterface
     public String getStats() {
         try {
+            String owner = db.activeOwner();
             long now = System.currentTimeMillis();
             synchronized (this) {
-                if (statsCache != null && now - statsAt < 10000) return statsCache;
+                if (statsCache != null && now - statsAt < 10000 && owner.equals(statsOwner)) return statsCache;
             }
             String s = db.getStats().toString();
-            synchronized (this) { statsCache = s; statsAt = now; }
+            synchronized (this) { statsCache = s; statsAt = now; statsOwner = owner; }
             return s;
+        } catch (Exception e) { return "{}"; }
+    }
+
+    @JavascriptInterface
+    public String switchOwner(String owner) {
+        try {
+            String o = owner != null ? owner.trim() : "";
+            if (o.isEmpty()) return getAllConfig();
+            db.putConfig("active_owner", o);
+            String user1 = db.getConfig("username", "LuckGaspar");
+            String user2 = db.getConfig("secondary_username", "");
+            if (user2 != null && !user2.trim().isEmpty()
+                    && !o.equalsIgnoreCase(user1.trim())
+                    && !o.equalsIgnoreCase(user2.trim())) {
+                db.putConfig("secondary_username", o);
+            }
+            invalidateStats();
+            return getAllConfig();
         } catch (Exception e) { return "{}"; }
     }
 
